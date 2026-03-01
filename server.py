@@ -427,6 +427,140 @@ def api_obsidian_export(lid):
     )
 
 
+# ── PDF / DOCX Export ─────────────────────────────────────────────────────────
+@app.route("/api/library/<int:lid>/export/pdf")
+def api_export_pdf(lid):
+    """Generate and stream an academic-style PDF for a lecture."""
+    from core.database import get_lecture, get_segments, get_insights, get_entities
+    lecture = get_lecture(lid)
+    if not lecture:
+        return jsonify({"error": "לא נמצא"}), 404
+    try:
+        from core.pdf_exporter import generate_pdf
+        pdf_bytes = generate_pdf(
+            lecture  = lecture,
+            segments = get_segments(lid),
+            insights = get_insights(lid),
+            entities = get_entities(lid),
+        )
+        safe_name = Path(lecture["filename"]).stem + ".pdf"
+        return Response(
+            pdf_bytes,
+            mimetype="application/pdf",
+            headers={"Content-Disposition": f"attachment; filename={safe_name}"},
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/library/<int:lid>/export/docx")
+def api_export_docx(lid):
+    """Generate and stream an academic-style DOCX for a lecture."""
+    from core.database import get_lecture, get_segments, get_insights, get_entities
+    lecture = get_lecture(lid)
+    if not lecture:
+        return jsonify({"error": "לא נמצא"}), 404
+    try:
+        from core.docx_exporter import generate_docx
+        docx_bytes = generate_docx(
+            lecture  = lecture,
+            segments = get_segments(lid),
+            insights = get_insights(lid),
+            entities = get_entities(lid),
+        )
+        safe_name = Path(lecture["filename"]).stem + ".docx"
+        return Response(
+            docx_bytes,
+            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={"Content-Disposition": f"attachment; filename={safe_name}"},
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── Segment update ────────────────────────────────────────────────────────────
+@app.route("/api/library/<int:lid>/segments/<int:sid>", methods=["PUT"])
+def api_segment_update(lid, sid):
+    """Update the text of a single segment after live editing."""
+    data = request.get_json(silent=True) or {}
+    text = data.get("text", "").strip()
+    if not text:
+        return jsonify({"error": "טקסט ריק"}), 400
+    from core.database import update_segment_text
+    update_segment_text(sid, lid, text)
+    return jsonify({"ok": True})
+
+
+# ── Annotations ───────────────────────────────────────────────────────────────
+@app.route("/api/library/<int:lid>/annotations", methods=["GET"])
+def api_annotations_list(lid):
+    from core.database import get_annotations
+    return jsonify(get_annotations(lid))
+
+
+@app.route("/api/library/<int:lid>/annotations", methods=["POST"])
+def api_annotations_create(lid):
+    data = request.get_json(silent=True) or {}
+    required = ("segment_id", "selected_text", "note")
+    if not all(data.get(k) for k in required):
+        return jsonify({"error": "חסרים שדות: segment_id, selected_text, note"}), 400
+    from core.database import save_annotation
+    aid = save_annotation(
+        lecture_id        = lid,
+        segment_id        = int(data["segment_id"]),
+        text_offset_start = int(data.get("text_offset_start", 0)),
+        text_offset_end   = int(data.get("text_offset_end", 0)),
+        selected_text     = data["selected_text"],
+        note              = data["note"],
+        color             = data.get("color", "yellow"),
+    )
+    return jsonify({"ok": True, "id": aid}), 201
+
+
+@app.route("/api/library/<int:lid>/annotations/<int:aid>", methods=["PUT"])
+def api_annotations_update(lid, aid):
+    data  = request.get_json(silent=True) or {}
+    note  = data.get("note", "")
+    color = data.get("color", "yellow")
+    from core.database import update_annotation
+    update_annotation(aid, note, color)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/library/<int:lid>/annotations/<int:aid>", methods=["DELETE"])
+def api_annotations_delete(lid, aid):
+    from core.database import delete_annotation
+    delete_annotation(aid)
+    return jsonify({"ok": True})
+
+
+# ── Ollama status ─────────────────────────────────────────────────────────────
+@app.route("/api/ollama/status", methods=["GET"])
+def api_ollama_status():
+    from core.ollama_client import is_available, list_models
+    available = is_available()
+    return jsonify({
+        "available": available,
+        "models":    list_models() if available else [],
+    })
+
+
+@app.route("/api/ollama/fix", methods=["POST"])
+def api_ollama_fix():
+    """Fix Hebrew text using local Ollama model."""
+    data  = request.get_json(silent=True) or {}
+    text  = data.get("text", "").strip()
+    model = data.get("model", "")
+    if not text:
+        return jsonify({"error": "טקסט ריק"}), 400
+    try:
+        from core.ollama_client import fix_hebrew_local
+        fixed = fix_hebrew_local(text, model=model)
+        return jsonify({"ok": True, "fixed": fixed})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # ── Settings ──────────────────────────────────────────────────────────────────
 @app.route("/api/chat", methods=["POST"])
 def api_chat():

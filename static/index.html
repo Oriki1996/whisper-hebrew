@@ -213,6 +213,32 @@
           2. הוסף <code>HF_TOKEN=hf_...</code> לקובץ <code>.env</code>
         </p>
       </div>
+
+      <div class="card" style="margin-top:16px">
+        <h2>🦙 Ollama — תיקון מקומי (ללא API)</h2>
+        <p class="hint">
+          תיקון בסיסי של תמלול עם מודל מקומי — בלי Claude, בלי עלות API.<br>
+          Ollama חייב לרוץ ב-<code>localhost:11434</code>.
+          הורד מ-<a href="https://ollama.ai" target="_blank" rel="noopener">ollama.ai</a>.
+        </p>
+        <div id="ollama-status-row" class="ollama-status-row">
+          <span id="ollama-status-badge" class="ollama-badge ollama-unknown">בודק...</span>
+          <button id="ollama-check-btn" class="btn-secondary btn-sm">בדוק חיבור</button>
+        </div>
+        <div class="option-row" style="margin-top:12px">
+          <label for="ollama-model-select">מודל</label>
+          <select id="ollama-model-select" dir="ltr">
+            <option value="llama3.2">llama3.2</option>
+            <option value="llama3">llama3</option>
+            <option value="mistral">mistral</option>
+            <option value="gemma">gemma</option>
+          </select>
+        </div>
+        <button id="ollama-fix-btn" class="btn-secondary" style="margin-top:12px" disabled>
+          🦙 תקן עם Ollama
+        </button>
+        <div id="ollama-msg" class="status-msg hidden"></div>
+      </div>
     </section>
 
     <!-- ── Progress ───────────────────────────────────────────────────────── -->
@@ -247,13 +273,24 @@
       <div class="result-header">
         <h2>תמלול</h2>
         <div class="result-actions">
-          <button id="insights-btn"     class="btn-secondary btn-sm">✨ נתח הרצאה</button>
-          <button id="citations-btn"    class="btn-secondary btn-sm hidden">🔖 חלץ מקורות</button>
-          <button id="anki-btn"         class="btn-secondary btn-sm hidden">⬇ Anki</button>
-          <button id="obsidian-btn"     class="btn-secondary btn-sm hidden">📝 Obsidian</button>
-          <button id="copy-btn"         class="btn-secondary btn-sm">📋 העתק</button>
-          <button id="download-txt-btn" class="btn-secondary btn-sm">⬇ TXT</button>
-          <button id="download-srt-btn" class="btn-secondary btn-sm">⬇ SRT</button>
+          <button id="edit-toggle-btn"   class="btn-secondary btn-sm">✏ ערוך</button>
+          <button id="save-edits-btn"    class="btn-secondary btn-sm hidden" style="color:var(--success)">💾 שמור</button>
+          <button id="cancel-edits-btn"  class="btn-secondary btn-sm hidden">✕ בטל</button>
+          <button id="insights-btn"      class="btn-secondary btn-sm">✨ נתח</button>
+          <button id="citations-btn"     class="btn-secondary btn-sm hidden">🔖 מקורות</button>
+          <button id="anki-btn"          class="btn-secondary btn-sm hidden">⬇ Anki</button>
+          <button id="copy-btn"          class="btn-secondary btn-sm">📋 העתק</button>
+          <!-- Export dropdown -->
+          <div class="export-dropdown-wrap">
+            <button id="export-dropdown-btn" class="btn-secondary btn-sm">⬇ ייצוא ▾</button>
+            <div id="export-dropdown-menu" class="export-dropdown-menu hidden" role="menu">
+              <button data-export="txt"      role="menuitem">📄 TXT</button>
+              <button data-export="srt"      role="menuitem">🕐 SRT</button>
+              <button data-export="pdf"      role="menuitem">📕 PDF (אקדמי)</button>
+              <button data-export="docx"     role="menuitem">📝 DOCX (Word)</button>
+              <button data-export="obsidian" role="menuitem">🗒 Obsidian</button>
+            </div>
+          </div>
         </div>
       </div>
       <div class="result-badges">
@@ -271,6 +308,32 @@
           <span id="references-spinner" class="insights-spinner hidden"></span>
         </div>
         <div id="references-body" class="references-body" dir="rtl"></div>
+      </div>
+    </div>
+
+    <!-- Annotation popup (appears on text selection) -->
+    <div id="annotation-popup" class="annotation-popup hidden" role="dialog" aria-label="הוסף הערת לימוד">
+      <div class="annotation-popup-title">📌 הערת לימוד</div>
+      <textarea id="annotation-note" placeholder="הקלד הערה..." rows="3" dir="rtl"></textarea>
+      <div class="annotation-color-row">
+        <button class="ann-color active" data-color="yellow" title="צהוב" style="background:#ffe066"></button>
+        <button class="ann-color" data-color="green"  title="ירוק"  style="background:#b5ead7"></button>
+        <button class="ann-color" data-color="blue"   title="כחול"  style="background:#c7e4ff"></button>
+        <button class="ann-color" data-color="red"    title="אדום"  style="background:#ffb3b3"></button>
+      </div>
+      <div class="annotation-popup-btns">
+        <button id="save-annotation-btn"   class="btn-primary btn-sm">שמור הערה</button>
+        <button id="cancel-annotation-btn" class="btn-secondary btn-sm">בטל</button>
+      </div>
+    </div>
+
+    <!-- Annotation detail popup (click on annotation marker) -->
+    <div id="annotation-detail" class="annotation-popup hidden" role="dialog">
+      <div id="annotation-detail-text" class="annotation-selected-text"></div>
+      <div id="annotation-detail-note" class="annotation-detail-note"></div>
+      <div class="annotation-popup-btns">
+        <button id="annotation-delete-btn" class="btn-secondary btn-sm" style="color:var(--error)">🗑 מחק</button>
+        <button id="annotation-detail-close" class="btn-secondary btn-sm">סגור</button>
       </div>
     </div>
 

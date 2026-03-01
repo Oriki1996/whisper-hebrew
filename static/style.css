@@ -787,3 +787,172 @@ h2 { font-size: 1.15rem; color: var(--text); margin: 0 0 8px; }
 .badge-book   { background: rgba(15,159,114,0.15); color: #0a7a56; }
 .badge-law    { background: rgba(176,95,191,0.15); color: #8b3fa0; }
 .badge-case   { background: rgba(217,132,91,0.18); color: #a84e20; }
+
+/* ── Live Editor ─────────────────────────────────────────────────────────── */
+.editing-segment {
+  background: rgba(200, 129, 58, 0.08);
+  outline: 1px dashed var(--primary);
+  border-radius: 3px;
+  cursor: text;
+  white-space: pre-wrap;
+}
+.editing-segment:focus {
+  outline: 2px solid var(--primary);
+  background: rgba(200, 129, 58, 0.15);
+}
+.edit-mode-indicator {
+  display: inline-block;
+  font-size: 0.78rem;
+  color: var(--primary);
+  margin-right: 8px;
+  font-weight: 600;
+}
+
+/* ── Annotations ─────────────────────────────────────────────────────────── */
+/* Highlight colours applied by JS via dataset.color */
+.annotation-hl[data-color="yellow"] { background: rgba(255, 224, 102, 0.5); }
+.annotation-hl[data-color="green"]  { background: rgba(181, 234, 215, 0.6); }
+.annotation-hl[data-color="blue"]   { background: rgba(199, 228, 255, 0.6); }
+.annotation-hl[data-color="red"]    { background: rgba(255, 179, 179, 0.5); }
+.annotation-hl {
+  border-bottom: 2px solid currentColor;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+/* Margin annotation marker */
+.annotation-marker {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--ann-color, #ffe066);
+  border: 1.5px solid rgba(0,0,0,0.2);
+  cursor: pointer;
+  margin-right: 4px;
+  vertical-align: middle;
+  flex-shrink: 0;
+  transition: transform 0.15s;
+}
+.annotation-marker:hover { transform: scale(1.35); }
+
+/* Annotation popup (creation + detail) */
+.annotation-popup {
+  position: fixed;
+  z-index: 1100;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 28px rgba(0,0,0,0.18);
+  padding: 14px 16px;
+  width: 280px;
+  direction: rtl;
+}
+.annotation-popup-title {
+  font-weight: 700;
+  font-size: 0.9rem;
+  margin-bottom: 8px;
+  color: var(--text);
+}
+.annotation-popup textarea {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 0.88rem;
+  resize: vertical;
+  background: var(--bg);
+  color: var(--text);
+  font-family: inherit;
+}
+.annotation-popup textarea:focus { outline: 2px solid var(--primary); }
+.annotation-color-row {
+  display: flex;
+  gap: 8px;
+  margin: 10px 0;
+}
+.ann-color {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.ann-color.active, .ann-color:hover { border-color: var(--text); }
+.annotation-popup-btns {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.annotation-selected-text {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  font-style: italic;
+  margin-bottom: 8px;
+  padding: 6px 10px;
+  background: var(--bg);
+  border-radius: 6px;
+  max-height: 60px;
+  overflow-y: auto;
+}
+.annotation-detail-note {
+  font-size: 0.9rem;
+  color: var(--text);
+  margin-bottom: 12px;
+  line-height: 1.5;
+}
+
+/* ── Export dropdown ─────────────────────────────────────────────────────── */
+.export-dropdown-wrap {
+  position: relative;
+  display: inline-block;
+}
+.export-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 300;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 24px rgba(0,0,0,0.14);
+  min-width: 190px;
+  padding: 4px 0;
+  direction: rtl;
+}
+.export-dropdown-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: right;
+  padding: 9px 14px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text);
+  font-size: 0.88rem;
+}
+.export-dropdown-menu button:hover {
+  background: rgba(200, 129, 58, 0.10);
+  color: var(--primary);
+}
+
+/* ── Ollama settings ─────────────────────────────────────────────────────── */
+.ollama-status-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0;
+}
+.ollama-badge {
+  display: inline-block;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+}
+.ollama-ok      { background: rgba(15,159,114,0.15); color: #0a7a56; }
+.ollama-error   { background: rgba(217,58,58,0.12);  color: var(--error); }
+.ollama-unknown { background: rgba(107,87,64,0.12);  color: var(--text-muted); }

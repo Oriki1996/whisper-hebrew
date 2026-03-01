@@ -56,6 +56,20 @@ def init_db() -> None:
             entities    TEXT,       -- JSON {authors, books, laws, cases} from NER
             created_at  TEXT    DEFAULT (datetime('now'))
         );
+
+        CREATE TABLE IF NOT EXISTS annotations (
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            lecture_id         INTEGER REFERENCES lectures(id) ON DELETE CASCADE,
+            segment_id         INTEGER REFERENCES segments(id) ON DELETE CASCADE,
+            text_offset_start  INTEGER DEFAULT 0,
+            text_offset_end    INTEGER DEFAULT 0,
+            selected_text      TEXT    NOT NULL DEFAULT '',
+            note               TEXT    NOT NULL DEFAULT '',
+            color              TEXT    DEFAULT 'yellow',
+            created_at         TEXT    DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_annotations_lecture
+            ON annotations(lecture_id);
         """)
     # Safe migration: add entities column to existing DBs
     with _conn() as conn:
@@ -334,3 +348,68 @@ def lexical_search(query: str, limit: int = 30) -> list[dict]:
         r["score"] = 1.0
         r["match_type"] = "lexical"
     return result
+
+
+# ── Segment editing ───────────────────────────────────────────────────────────
+
+def update_segment_text(segment_id: int, lecture_id: int, text: str) -> None:
+    """Update the text of a single segment (used after live editing)."""
+    with _conn() as conn:
+        conn.execute(
+            "UPDATE segments SET text = ? WHERE id = ? AND lecture_id = ?",
+            (text, segment_id, lecture_id),
+        )
+
+
+# ── Annotations ───────────────────────────────────────────────────────────────
+
+def save_annotation(
+    lecture_id: int,
+    segment_id: int,
+    text_offset_start: int,
+    text_offset_end: int,
+    selected_text: str,
+    note: str,
+    color: str = "yellow",
+) -> int:
+    """Insert a new annotation and return its id."""
+    with _conn() as conn:
+        cur = conn.execute(
+            """INSERT INTO annotations
+               (lecture_id, segment_id, text_offset_start, text_offset_end,
+                selected_text, note, color)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (lecture_id, segment_id, text_offset_start, text_offset_end,
+             selected_text, note, color),
+        )
+        return cur.lastrowid
+
+
+def get_annotations(lecture_id: int) -> list[dict]:
+    """Return all annotations for a lecture, ordered by segment start_time."""
+    with _conn() as conn:
+        rows = conn.execute(
+            """SELECT a.id, a.lecture_id, a.segment_id,
+                      a.text_offset_start, a.text_offset_end,
+                      a.selected_text, a.note, a.color, a.created_at,
+                      s.start_time
+               FROM annotations a
+               LEFT JOIN segments s ON s.id = a.segment_id
+               WHERE a.lecture_id = ?
+               ORDER BY s.start_time, a.id""",
+            (lecture_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def update_annotation(annotation_id: int, note: str, color: str) -> None:
+    with _conn() as conn:
+        conn.execute(
+            "UPDATE annotations SET note = ?, color = ? WHERE id = ?",
+            (note, color, annotation_id),
+        )
+
+
+def delete_annotation(annotation_id: int) -> None:
+    with _conn() as conn:
+        conn.execute("DELETE FROM annotations WHERE id = ?", (annotation_id,))

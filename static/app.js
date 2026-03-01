@@ -74,10 +74,14 @@ const playerWrap        = document.getElementById('player-wrap');
 const mediaPlayer       = document.getElementById('media-player');
 const insightsBtn       = document.getElementById('insights-btn');
 const ankiBtn           = document.getElementById('anki-btn');
-const obsidianBtn       = document.getElementById('obsidian-btn');
 const copyBtn           = document.getElementById('copy-btn');
-const dlTxtBtn          = document.getElementById('download-txt-btn');
-const dlSrtBtn          = document.getElementById('download-srt-btn');
+// Edit mode
+const editToggleBtn     = document.getElementById('edit-toggle-btn');
+const saveEditsBtn      = document.getElementById('save-edits-btn');
+const cancelEditsBtn    = document.getElementById('cancel-edits-btn');
+// Export dropdown
+const exportDropdownBtn  = document.getElementById('export-dropdown-btn');
+const exportDropdownMenu = document.getElementById('export-dropdown-menu');
 const badgeFixed        = document.getElementById('badge-fixed');
 const badgeRaw          = document.getElementById('badge-raw');
 const insightsSec       = document.getElementById('insights-section');
@@ -225,9 +229,8 @@ function showResult(result) {
   badgeFixed.classList.toggle('hidden', !result.fixed);
   badgeRaw.classList.toggle('hidden', result.fixed);
 
-  // Show Anki/Obsidian/Citations buttons if lecture is in library
+  // Show Anki/Citations buttons if lecture is in library
   ankiBtn.classList.toggle('hidden', !currentLectureId);
-  obsidianBtn.classList.toggle('hidden', !currentLectureId);
   citationsBtn.classList.toggle('hidden', !currentLectureId);
   referencesPanel.classList.add('hidden');
 
@@ -350,10 +353,12 @@ function _renderSegments(segments) {
     span.className    = 'segment';
     span.dataset.start = seg.start;
     span.dataset.end   = seg.end;
+    if (seg.id) span.dataset.segmentId = seg.id;
     span.textContent   = seg.text.trim();
     span.title         = _fmt(seg.start);
 
     span.addEventListener('click', () => {
+      if (_editMode) return;  // click-to-seek disabled in edit mode
       if (ws) {
         ws.seekTo(seg.start / (ws.getDuration() || 1));
         ws.play();
@@ -418,17 +423,17 @@ copyBtn.addEventListener('click', () => {
     .catch(() => {});
 });
 
-dlTxtBtn.addEventListener('click', () => {
+function _exportTxt() {
   if (!currentResult) return;
   const filename = currentResult.txt_path?.split(/[/\\]/).pop() || 'transcript.txt';
   downloadText(_fullText(), filename);
-});
+}
 
-dlSrtBtn.addEventListener('click', () => {
+function _exportSrt() {
   if (!currentResult?.srt_path) return;
   const name = currentResult.srt_path.split(/[/\\]/).pop();
   window.open('/output/' + name);
-});
+}
 
 function downloadText(text, filename) {
   const a = document.createElement('a');
@@ -465,21 +470,21 @@ ankiBtn.addEventListener('click', async () => {
 });
 
 // ── Obsidian export ───────────────────────────────────────────────────────────
-obsidianBtn.addEventListener('click', async () => {
-  if (!currentLectureId) return;
+async function _exportObsidian() {
+  if (!currentLectureId) { alert('יש לשמור הרצאה בספרייה תחילה'); return; }
   try {
     const res = await fetch(`/api/library/${currentLectureId}/obsidian`);
     if (res.ok) {
       const text = await res.text();
       await navigator.clipboard.writeText(text);
-      flashBtn(obsidianBtn, '✅ הועתק!');
+      alert('✅ ה-Markdown הועתק ללוח!');
     } else {
       alert('שגיאה בייצוא Obsidian');
     }
   } catch (e) {
     alert('שגיאת חיבור: ' + e.message);
   }
-});
+}
 
 // ── AI Insights ───────────────────────────────────────────────────────────────
 insightsBtn.addEventListener('click', async () => {
@@ -647,7 +652,6 @@ async function _openLibraryLecture(lid) {
     badgeFixed.classList.toggle('hidden', !data.lecture.full_fixed_text);
     badgeRaw.classList.toggle('hidden',   !!data.lecture.full_fixed_text);
     ankiBtn.classList.remove('hidden');
-    obsidianBtn.classList.remove('hidden');
     citationsBtn.classList.remove('hidden');
     referencesPanel.classList.add('hidden');
 
@@ -656,12 +660,14 @@ async function _openLibraryLecture(lid) {
 
     _renderSegments(
       (data.segments || []).map(s => ({
+        id:         s.id,
         start:      s.start_time,
         end:        s.end_time,
         text:       s.text,
         speaker_id: s.speaker_id || '',
       }))
     );
+    _loadAnnotations(lid);
 
     resultSec.classList.remove('hidden');
     transcriptContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -731,7 +737,7 @@ async function _downloadObsidian(lid) {
   if (res.ok) {
     const text = await res.text();
     await navigator.clipboard.writeText(text);
-    alert('ה-Markdown הועתק ללוח!');
+    alert('✅ ה-Markdown הועתק ללוח!');
   } else {
     alert('שגיאה בייצוא Obsidian');
   }
@@ -1187,3 +1193,374 @@ document.querySelectorAll('.tab').forEach(tab => {
   `;
   document.head.appendChild(s);
 })();
+
+// ── Edit mode state ───────────────────────────────────────────────────────────
+let _editMode = false;
+
+function _enterEditMode() {
+  _editMode = true;
+  editToggleBtn.classList.add('hidden');
+  saveEditsBtn.classList.remove('hidden');
+  cancelEditsBtn.classList.remove('hidden');
+  segmentSpans.forEach(span => {
+    span.contentEditable = 'true';
+    span.classList.add('editing-segment');
+  });
+}
+
+function _exitEditMode() {
+  _editMode = false;
+  editToggleBtn.classList.remove('hidden');
+  saveEditsBtn.classList.add('hidden');
+  cancelEditsBtn.classList.add('hidden');
+  segmentSpans.forEach(span => {
+    span.contentEditable = 'false';
+    span.classList.remove('editing-segment');
+  });
+}
+
+async function _saveEdits() {
+  if (!currentLectureId) {
+    if (currentResult) currentResult.text = segmentSpans.map(s => s.textContent).join(' ');
+    _exitEditMode();
+    return;
+  }
+  saveEditsBtn.disabled = true;
+  try {
+    // Update each segment in DB
+    const updates = segmentSpans
+      .filter(span => span.dataset.segmentId)
+      .map(span =>
+        fetch(`/api/library/${currentLectureId}/segments/${span.dataset.segmentId}`, {
+          method:  'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ text: span.textContent.trim() }),
+        })
+      );
+    await Promise.all(updates);
+
+    // Update full_fixed_text
+    const fullText = segmentSpans.map(s => s.textContent.trim()).join(' ');
+    await fetch(`/api/library/${currentLectureId}`, {
+      method:  'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ full_fixed_text: fullText }),
+    });
+    if (currentResult) currentResult.text = fullText;
+    flashBtn(saveEditsBtn, '✅ נשמר!');
+    setTimeout(_exitEditMode, 1000);
+  } catch (e) {
+    alert('שגיאה בשמירה: ' + e.message);
+  } finally {
+    saveEditsBtn.disabled = false;
+  }
+}
+
+editToggleBtn.addEventListener('click',  _enterEditMode);
+saveEditsBtn.addEventListener('click',   _saveEdits);
+cancelEditsBtn.addEventListener('click', _exitEditMode);
+
+// ── Export dropdown ───────────────────────────────────────────────────────────
+exportDropdownBtn.addEventListener('click', e => {
+  e.stopPropagation();
+  exportDropdownMenu.classList.toggle('hidden');
+});
+
+document.addEventListener('click', () => {
+  exportDropdownMenu.classList.add('hidden');
+});
+
+exportDropdownMenu.addEventListener('click', e => {
+  const btn = e.target.closest('[data-export]');
+  if (!btn) return;
+  exportDropdownMenu.classList.add('hidden');
+  switch (btn.dataset.export) {
+    case 'txt':      _exportTxt();      break;
+    case 'srt':      _exportSrt();      break;
+    case 'pdf':      _exportPdf();      break;
+    case 'docx':     _exportDocx();     break;
+    case 'obsidian': _exportObsidian(); break;
+  }
+});
+
+function _exportPdf() {
+  if (!currentLectureId) { alert('יש לשמור הרצאה בספרייה תחילה'); return; }
+  window.open(`/api/library/${currentLectureId}/export/pdf`);
+}
+
+function _exportDocx() {
+  if (!currentLectureId) { alert('יש לשמור הרצאה בספרייה תחילה'); return; }
+  window.open(`/api/library/${currentLectureId}/export/docx`);
+}
+
+// ── Annotations ───────────────────────────────────────────────────────────────
+let _annotations   = [];
+let _annPendingSel = null;
+let _annColor      = 'yellow';
+let _annDetailId   = null;
+
+const annotationPopup       = document.getElementById('annotation-popup');
+const annotationNote        = document.getElementById('annotation-note');
+const saveAnnotationBtn     = document.getElementById('save-annotation-btn');
+const cancelAnnotationBtn   = document.getElementById('cancel-annotation-btn');
+const annotationDetail      = document.getElementById('annotation-detail');
+const annotationDetailText  = document.getElementById('annotation-detail-text');
+const annotationDetailNote  = document.getElementById('annotation-detail-note');
+const annotationDeleteBtn   = document.getElementById('annotation-delete-btn');
+const annotationDetailClose = document.getElementById('annotation-detail-close');
+
+// Color picker in annotation popup
+document.querySelectorAll('.ann-color').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.ann-color').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    _annColor = btn.dataset.color;
+  });
+});
+
+// Detect text selection in transcript
+transcriptContainer.addEventListener('mouseup', () => {
+  if (_editMode) return;
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed) return;
+  const selectedText = sel.toString().trim();
+  if (selectedText.length < 2) return;
+
+  const range = sel.getRangeAt(0);
+  let anchorEl = range.startContainer;
+  while (anchorEl && !anchorEl.classList?.contains('segment')) {
+    anchorEl = anchorEl.parentElement;
+  }
+
+  _annPendingSel = {
+    selectedText,
+    segmentId:   anchorEl?.dataset?.segmentId ? parseInt(anchorEl.dataset.segmentId) : 0,
+    startOffset: range.startOffset,
+    endOffset:   range.endOffset,
+  };
+
+  const rect  = range.getBoundingClientRect();
+  const scrollY = window.scrollY || 0;
+  let left = rect.left + window.scrollX;
+  if (left + 300 > window.innerWidth) left = window.innerWidth - 308;
+  annotationPopup.style.top  = (rect.bottom + scrollY + 8) + 'px';
+  annotationPopup.style.left = left + 'px';
+  annotationNote.value = '';
+  annotationPopup.classList.remove('hidden');
+  annotationNote.focus();
+});
+
+saveAnnotationBtn.addEventListener('click', async () => {
+  if (!_annPendingSel) return;
+  const note = annotationNote.value.trim();
+  if (!note) { annotationNote.focus(); return; }
+
+  annotationPopup.classList.add('hidden');
+
+  if (!currentLectureId) {
+    _annPendingSel = null;
+    return;
+  }
+  try {
+    const res = await fetch(`/api/library/${currentLectureId}/annotations`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        segment_id:        _annPendingSel.segmentId,
+        text_offset_start: _annPendingSel.startOffset,
+        text_offset_end:   _annPendingSel.endOffset,
+        selected_text:     _annPendingSel.selectedText,
+        note,
+        color: _annColor,
+      }),
+    });
+    const data = await res.json();
+    if (data.id) {
+      _annotations.push({
+        id:            data.id,
+        selected_text: _annPendingSel.selectedText,
+        note,
+        color:         _annColor,
+        segment_id:    _annPendingSel.segmentId,
+      });
+      _renderAnnotationMarkers(_annotations);
+    }
+  } catch (e) {
+    console.error('Annotation save error:', e);
+  }
+  _annPendingSel = null;
+  window.getSelection()?.removeAllRanges();
+});
+
+cancelAnnotationBtn.addEventListener('click', () => {
+  annotationPopup.classList.add('hidden');
+  _annPendingSel = null;
+  window.getSelection()?.removeAllRanges();
+});
+
+// Close annotation detail when clicking outside
+document.addEventListener('click', e => {
+  if (
+    !annotationDetail.contains(e.target) &&
+    !e.target.classList.contains('annotation-marker')
+  ) {
+    annotationDetail.classList.add('hidden');
+    _annDetailId = null;
+  }
+});
+
+function _colorHex(color) {
+  return { yellow: '#ffe066', green: '#b5ead7', blue: '#c7e4ff', red: '#ffb3b3' }[color] || '#ffe066';
+}
+
+function _renderAnnotationMarkers(annotations) {
+  // Remove existing markers
+  transcriptContainer.querySelectorAll('.annotation-marker').forEach(m => m.remove());
+
+  // Group by segment_id
+  const bySegment = {};
+  for (const ann of annotations) {
+    const sid = ann.segment_id || 0;
+    if (!bySegment[sid]) bySegment[sid] = [];
+    bySegment[sid].push(ann);
+  }
+
+  for (const span of segmentSpans) {
+    const sid  = parseInt(span.dataset.segmentId || '0');
+    const anns = bySegment[sid] || [];
+    for (const ann of anns) {
+      const marker = document.createElement('span');
+      marker.className = 'annotation-marker';
+      marker.style.setProperty('--ann-color', _colorHex(ann.color));
+      marker.title = ann.note;
+      marker.dataset.annId = ann.id;
+      marker.addEventListener('click', e => { e.stopPropagation(); _showAnnotationDetail(ann, e); });
+      span.after(marker);
+    }
+  }
+}
+
+function _showAnnotationDetail(ann, event) {
+  _annDetailId = ann.id;
+  annotationDetailText.textContent = `"${ann.selected_text}"`;
+  annotationDetailNote.textContent = ann.note;
+
+  const rect    = event.target.getBoundingClientRect();
+  const scrollY = window.scrollY || 0;
+  let left = rect.left + window.scrollX;
+  if (left + 300 > window.innerWidth) left = window.innerWidth - 308;
+  annotationDetail.style.top  = (rect.bottom + scrollY + 8) + 'px';
+  annotationDetail.style.left = left + 'px';
+  annotationDetail.classList.remove('hidden');
+}
+
+annotationDeleteBtn.addEventListener('click', async () => {
+  if (!_annDetailId || !currentLectureId) return;
+  try {
+    await fetch(`/api/library/${currentLectureId}/annotations/${_annDetailId}`, {
+      method: 'DELETE',
+    });
+    _annotations = _annotations.filter(a => a.id !== _annDetailId);
+    _renderAnnotationMarkers(_annotations);
+    annotationDetail.classList.add('hidden');
+    _annDetailId = null;
+  } catch (e) {
+    console.error('Delete annotation error:', e);
+  }
+});
+
+annotationDetailClose.addEventListener('click', () => {
+  annotationDetail.classList.add('hidden');
+  _annDetailId = null;
+});
+
+async function _loadAnnotations(lid) {
+  _annotations = [];
+  try {
+    const res = await fetch(`/api/library/${lid}/annotations`);
+    if (res.ok) {
+      _annotations = await res.json();
+      _renderAnnotationMarkers(_annotations);
+    }
+  } catch (_) {}
+}
+
+// ── Ollama UI ─────────────────────────────────────────────────────────────────
+const ollamaStatusBadge = document.getElementById('ollama-status-badge');
+const ollamaCheckBtn    = document.getElementById('ollama-check-btn');
+const ollamaModelSelect = document.getElementById('ollama-model-select');
+const ollamaFixBtn      = document.getElementById('ollama-fix-btn');
+const ollamaMsg         = document.getElementById('ollama-msg');
+
+async function _checkOllama() {
+  ollamaStatusBadge.textContent = 'בודק...';
+  ollamaStatusBadge.className   = 'ollama-badge ollama-unknown';
+  ollamaCheckBtn.disabled = true;
+  try {
+    const res  = await fetch('/api/ollama/status');
+    const data = await res.json();
+    if (data.available) {
+      ollamaStatusBadge.textContent = '🟢 מחובר';
+      ollamaStatusBadge.className   = 'ollama-badge ollama-ok';
+      ollamaFixBtn.disabled = false;
+      if (data.models?.length) {
+        ollamaModelSelect.innerHTML = '';
+        data.models.forEach(m => {
+          const opt = document.createElement('option');
+          opt.value = opt.textContent = m;
+          ollamaModelSelect.appendChild(opt);
+        });
+      }
+    } else {
+      ollamaStatusBadge.textContent = '🔴 לא זמין';
+      ollamaStatusBadge.className   = 'ollama-badge ollama-error';
+      ollamaFixBtn.disabled = true;
+    }
+  } catch (_) {
+    ollamaStatusBadge.textContent = '🔴 שגיאה';
+    ollamaStatusBadge.className   = 'ollama-badge ollama-error';
+  } finally {
+    ollamaCheckBtn.disabled = false;
+  }
+}
+
+ollamaCheckBtn.addEventListener('click', _checkOllama);
+
+ollamaFixBtn.addEventListener('click', async () => {
+  const text = _fullText();
+  if (!text) { alert('אין טקסט לתיקון'); return; }
+
+  ollamaFixBtn.disabled = true;
+  showStatus(ollamaMsg, 'מתקן עם Ollama...', '');
+  ollamaMsg.className = 'status-msg';
+  ollamaMsg.classList.remove('hidden');
+
+  try {
+    const res  = await fetch('/api/ollama/fix', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ text, model: ollamaModelSelect.value }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      transcriptContainer.innerHTML = '';
+      transcriptContainer.textContent = data.text;
+      segmentSpans = [];
+      if (currentResult) currentResult.text = data.text;
+      showStatus(ollamaMsg, '✅ הטקסט תוקן בהצלחה!', 'success');
+    } else {
+      showStatus(ollamaMsg, data.error || 'שגיאה בתיקון', 'error');
+    }
+  } catch (e) {
+    showStatus(ollamaMsg, 'שגיאת חיבור: ' + e.message, 'error');
+  } finally {
+    ollamaFixBtn.disabled = false;
+  }
+});
+
+// Auto-check Ollama when Settings tab is opened
+document.querySelectorAll('.tab').forEach(tab => {
+  if (tab.dataset.tab === 'settings') {
+    tab.addEventListener('click', _checkOllama);
+  }
+});
