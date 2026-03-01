@@ -1,21 +1,33 @@
-"""core/whisper_runner.py — Whisper transcription wrapper."""
-import warnings
+"""core/whisper_runner.py — Whisper transcription wrapper (faster-whisper)."""
 from pathlib import Path
 from typing import Callable, Optional
 
 from .config import setup_ffmpeg_env, OUTPUT_DIR
 
-# Suppress FP16 warning on CPU
-warnings.filterwarnings("ignore", message="FP16 is not supported on CPU")
-
 _model_cache: dict = {}
 
 
+def _detect_device() -> tuple[str, str]:
+    """Return (device, compute_type) based on available hardware."""
+    try:
+        import ctranslate2
+        if ctranslate2.get_cuda_device_count() > 0:
+            return "cuda", "float16"
+    except Exception:
+        pass
+    return "cpu", "int8"
+
+
 def _get_model(model_name: str):
-    """Load and cache Whisper model (avoid reloading between files)."""
+    """Load and cache faster-whisper model (avoid reloading between files)."""
     if model_name not in _model_cache:
-        import whisper
-        _model_cache[model_name] = whisper.load_model(model_name)
+        from faster_whisper import WhisperModel
+        device, compute_type = _detect_device()
+        _model_cache[model_name] = WhisperModel(
+            model_name,
+            device=device,
+            compute_type=compute_type,
+        )
     return _model_cache[model_name]
 
 
@@ -29,7 +41,7 @@ def _format_timestamp(seconds: float) -> str:
 
 
 def _write_srt(segments: list, out_path: Path):
-    """Write SRT subtitle file from Whisper segments."""
+    """Write SRT subtitle file from segment dicts."""
     lines = []
     for i, seg in enumerate(segments, 1):
         start = _format_timestamp(seg["start"])
@@ -51,17 +63,17 @@ def transcribe(
     progress_cb: Optional[Callable[[float, str], None]] = None,
 ) -> dict:
     """
-    Transcribe an audio/video file with Whisper.
+    Transcribe an audio/video file with faster-whisper.
 
     Args:
         file_path: Path to audio/video file.
         model_name: Whisper model name (tiny/small/medium/large).
-        language: Language code, e.g. "he" for Hebrew.
+        language: Language code, e.g. "he" for Hebrew. Pass None for auto-detect.
         output_dir: Where to save .txt and .srt. Defaults to OUTPUT_DIR.
         progress_cb: Optional callback(pct: float, msg: str) for progress updates.
 
     Returns:
-        dict with keys: text, segments, duration, txt_path, srt_path
+        dict with keys: text, segments (list of dicts), duration, txt_path, srt_path
     """
     setup_ffmpeg_env()
 
@@ -81,22 +93,36 @@ def transcribe(
     if progress_cb:
         progress_cb(0.05, f"מתמלל: {file_path.name}")
 
-    result = model.transcribe(
+    # faster-whisper returns a (segments_generator, info) tuple
+    lang_arg = language if language and language != "auto" else None
+    segments_gen, info = model.transcribe(
         str(file_path),
-        language=language,
-        verbose=False,
+        language=lang_arg,
+        beam_size=5,
+        vad_filter=True,           # skip silent sections — faster + cleaner
+        vad_parameters={"min_silence_duration_ms": 500},
     )
 
-    segments = result.get("segments", [])
-    full_text = result.get("text", "")
-    duration = segments[-1]["end"] if segments else 0.0
+    # Materialise the generator so we can iterate twice (progress + SRT)
+    # and convert Segment objects → plain dicts (same shape as openai-whisper)
+    segments: list[dict] = []
+    full_text_parts: list[str] = []
+    duration = info.duration or 0.0
 
-    # Simulate per-segment progress after transcription
-    if progress_cb:
-        total = len(segments) or 1
-        for i, seg in enumerate(segments):
-            pct = 0.05 + 0.85 * (i + 1) / total
-            progress_cb(pct, seg["text"].strip()[:60])
+    for seg in segments_gen:
+        text = seg.text.strip()
+        segments.append({
+            "start": seg.start,
+            "end":   seg.end,
+            "text":  text,
+        })
+        full_text_parts.append(text)
+
+        if progress_cb and duration > 0:
+            pct = 0.05 + 0.85 * (seg.end / duration)
+            progress_cb(min(pct, 0.90), text[:60])
+
+    full_text = " ".join(full_text_parts)
 
     _write_txt(full_text, txt_path)
     _write_srt(segments, srt_path)
@@ -105,7 +131,7 @@ def transcribe(
         progress_cb(0.95, "שומר קבצים...")
 
     return {
-        "text": full_text,
+        "text":     full_text,
         "segments": segments,
         "duration": duration,
         "txt_path": str(txt_path),
