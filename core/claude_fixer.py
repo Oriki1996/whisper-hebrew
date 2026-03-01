@@ -81,38 +81,37 @@ def _call_with_retry(client, chunk: str, context: str, chunk_idx: int, total: in
 
 INSIGHTS_SYSTEM_PROMPT = """\
 אתה מומחה לניתוח הרצאות אקדמיות בעברית.
-קיבלת תמלול של הרצאה אקדמית. נתח אותה לעומק והפק דוח מובנה בפורמט Markdown.
+קיבלת תמלול של הרצאה אקדמית. נתח אותה לעומק והפק JSON מובנה.
 
-הדוח חייב לכלול את הסעיפים הבאים בדיוק:
+החזר אך ורק אובייקט JSON תקני (ללא הקדמות, ללא markdown fence, ללא הסברים):
+{
+  "summary": "סיכום תמציתי — עד 5 פסקאות קצרות המכסות את עיקרי הדברים",
+  "key_terms": [{"term": "שם המושג", "definition": "הסבר קצר"}],
+  "anki_cards": [{"front": "שאלה ברורה", "back": "תשובה מלאה"}],
+  "citations": [{"author": "שם", "title": "כותרת", "year": "שנה", "context": "הקשר"}]
+}
 
-## סיכום תמציתי
-עיקרי הדברים בהרצאה — עד 5 פסקאות קצרות. כתוב בשפה ברורה ונגישה.
-
-## מושגי מפתח
-רשימת המונחים החשובים שהוזכרו בהרצאה, כל אחד עם הסבר קצר של 1-2 משפטים.
-
-## שאלות לתרגול
-3-5 שאלות פתוחות שיכולות להופיע במבחן על בסיס החומר. כתוב שאלות מאתגרות שדורשות הבנה ולא שינון.
-
-החזר רק את הדוח בפורמט Markdown תקני, ללא הקדמות.\
+הנחיות: key_terms 5-10 מונחים, anki_cards 5-10 כרטיסיות מאתגרות, citations — רק אם הוזכרו בפירוש (אחרת []).\
 """
 
 
-def generate_insights(text: str, api_key: Optional[str] = None) -> str:
+def generate_insights(text: str, api_key: Optional[str] = None) -> dict:
     """
-    Generate academic insights from a Hebrew transcription using Claude.
+    Generate structured academic insights from a Hebrew transcription using Claude.
 
     Args:
-        text: Transcription text (full or truncated).
+        text:    Transcription text (truncated to 80,000 chars).
         api_key: Anthropic API key. Falls back to ANTHROPIC_API_KEY env var.
 
     Returns:
-        Markdown-formatted academic analysis.
+        dict with keys: summary (str), key_terms (list), anki_cards (list), citations (list)
 
     Raises:
         ValueError: If no API key is available.
-        RuntimeError: If the API call fails after retries.
+        RuntimeError: If all retry attempts fail.
     """
+    import json as _json
+
     try:
         import anthropic
     except ImportError:
@@ -126,8 +125,6 @@ def generate_insights(text: str, api_key: Optional[str] = None) -> str:
         )
 
     client = anthropic.Anthropic(api_key=key)
-
-    # Use up to ~80,000 chars (~20,000 Hebrew words) — enough for a full lecture
     truncated = text[:80_000]
     user_content = f"תמלול ההרצאה לניתוח:\n\n{truncated}"
 
@@ -135,13 +132,26 @@ def generate_insights(text: str, api_key: Optional[str] = None) -> str:
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             print(f"מנתח הרצאה עם Claude (ניסיון {attempt})...", flush=True)
+            extra = "" if attempt == 1 else "\n\nחשוב: JSON תקני בלבד, ללא טקסט אחר."
             message = client.messages.create(
                 model="claude-haiku-4-5-20251001",
                 max_tokens=4096,
                 system=INSIGHTS_SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": user_content}],
+                messages=[{"role": "user", "content": user_content + extra}],
             )
-            return message.content[0].text.strip()
+            raw = message.content[0].text.strip()
+            # Strip markdown fences if model wrapped the JSON
+            if raw.startswith("```"):
+                raw = raw.split("```", 2)[1]
+                if raw.startswith("json"):
+                    raw = raw[4:]
+                raw = raw.rsplit("```", 1)[0].strip()
+            return _json.loads(raw)
+        except _json.JSONDecodeError as e:
+            last_error = e
+            print(f"  ⚠ JSON parse error (ניסיון {attempt}/{MAX_RETRIES}): {e}")
+            if attempt < MAX_RETRIES:
+                time.sleep(RETRY_DELAY)
         except Exception as e:
             last_error = e
             if attempt < MAX_RETRIES:
@@ -149,6 +159,36 @@ def generate_insights(text: str, api_key: Optional[str] = None) -> str:
                 time.sleep(RETRY_DELAY)
 
     raise RuntimeError(f"ניתוח נכשל לאחר {MAX_RETRIES} ניסיונות: {last_error}")
+
+
+def insights_to_markdown(d: dict) -> str:
+    """Convert a generate_insights() result dict to a Markdown string for display."""
+    lines = []
+    if summary := d.get("summary"):
+        lines += ["## סיכום תמציתי", "", summary, ""]
+    if terms := d.get("key_terms"):
+        lines += ["## מושגי מפתח", ""]
+        for t in terms:
+            lines.append(f"- **{t.get('term', '')}** — {t.get('definition', '')}")
+        lines.append("")
+    if cards := d.get("anki_cards"):
+        lines += ["## שאלות לתרגול (Anki)", ""]
+        for i, c in enumerate(cards, 1):
+            lines.append(f"{i}. **{c.get('front', '')}**")
+            lines.append(f"   _{c.get('back', '')}_")
+        lines.append("")
+    if citations := d.get("citations"):
+        lines += ["## מקורות שהוזכרו", ""]
+        for c in citations:
+            ref = f"- {c.get('author', '')}"
+            if c.get("title"):
+                ref += f", *{c['title']}*"
+            if c.get("year"):
+                ref += f" ({c['year']})"
+            if c.get("context"):
+                ref += f" — {c['context']}"
+            lines.append(ref)
+    return "\n".join(lines)
 
 
 def fix_hebrew(raw_text: str, api_key: Optional[str] = None) -> str:

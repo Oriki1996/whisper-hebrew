@@ -45,8 +45,8 @@ def _write_srt(segments: list, out_path: Path):
     lines = []
     for i, seg in enumerate(segments, 1):
         start = _format_timestamp(seg["start"])
-        end = _format_timestamp(seg["end"])
-        text = seg["text"].strip()
+        end   = _format_timestamp(seg["end"])
+        text  = seg["text"].strip()
         lines.append(f"{i}\n{start} --> {end}\n{text}\n")
     out_path.write_text("\n".join(lines), encoding="utf-8")
 
@@ -61,27 +61,31 @@ def transcribe(
     language: str = "he",
     output_dir: Optional[Path] = None,
     progress_cb: Optional[Callable[[float, str], None]] = None,
+    diarize: bool = False,
 ) -> dict:
     """
     Transcribe an audio/video file with faster-whisper.
 
     Args:
-        file_path: Path to audio/video file.
-        model_name: Whisper model name (tiny/small/medium/large).
-        language: Language code, e.g. "he" for Hebrew. Pass None for auto-detect.
-        output_dir: Where to save .txt and .srt. Defaults to OUTPUT_DIR.
+        file_path:   Path to audio/video file.
+        model_name:  Whisper model name (tiny/small/medium/large).
+        language:    Language code, e.g. "he" for Hebrew. Pass None for auto-detect.
+        output_dir:  Where to save .txt and .srt. Defaults to OUTPUT_DIR.
         progress_cb: Optional callback(pct: float, msg: str) for progress updates.
+        diarize:     Run pyannote-audio speaker diarization (requires HF_TOKEN in env).
 
     Returns:
-        dict with keys: text, segments (list of dicts), duration, txt_path, srt_path
+        dict with keys:
+          text, segments (list of dicts), duration, txt_path, srt_path
+        Each segment dict: {start, end, text, speaker_id, words}
     """
     setup_ffmpeg_env()
 
     file_path = Path(file_path)
-    out_dir = Path(output_dir) if output_dir else OUTPUT_DIR
+    out_dir   = Path(output_dir) if output_dir else OUTPUT_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    stem = file_path.stem
+    stem     = file_path.stem
     txt_path = out_dir / f"{stem}.txt"
     srt_path = out_dir / f"{stem}.srt"
 
@@ -99,28 +103,53 @@ def transcribe(
         str(file_path),
         language=lang_arg,
         beam_size=5,
-        vad_filter=True,           # skip silent sections — faster + cleaner
+        word_timestamps=True,           # word-level timestamps for precise click-to-jump
+        vad_filter=True,                # skip silent sections — faster + cleaner
         vad_parameters={"min_silence_duration_ms": 500},
     )
 
-    # Materialise the generator so we can iterate twice (progress + SRT)
-    # and convert Segment objects → plain dicts (same shape as openai-whisper)
+    # Materialise the generator: convert Segment objects → plain dicts
     segments: list[dict] = []
     full_text_parts: list[str] = []
     duration = info.duration or 0.0
 
     for seg in segments_gen:
         text = seg.text.strip()
+
+        # Extract word-level timestamps
+        words = []
+        if seg.words:
+            for w in seg.words:
+                words.append({
+                    "word":        w.word,
+                    "start":       w.start,
+                    "end":         w.end,
+                    "probability": round(w.probability, 3),
+                })
+
         segments.append({
-            "start": seg.start,
-            "end":   seg.end,
-            "text":  text,
+            "start":      seg.start,
+            "end":        seg.end,
+            "text":       text,
+            "speaker_id": "",       # populated by diarizer below (if enabled)
+            "words":      words,
         })
         full_text_parts.append(text)
 
         if progress_cb and duration > 0:
-            pct = 0.05 + 0.85 * (seg.end / duration)
-            progress_cb(min(pct, 0.90), text[:60])
+            pct = 0.05 + 0.80 * (seg.end / duration)
+            progress_cb(min(pct, 0.85), text[:60])
+
+    # ── Optional speaker diarization ─────────────────────────────────────────
+    if diarize:
+        if progress_cb:
+            progress_cb(0.86, "מזהה דוברים...")
+        try:
+            from .diarizer import diarize as _diarize, assign_speakers
+            diar_result = _diarize(file_path)
+            segments = assign_speakers(segments, diar_result)
+        except Exception as e:
+            print(f"  ⚠ דיאריזציה נכשלה (ממשיך ללא זיהוי דוברים): {e}", flush=True)
 
     full_text = " ".join(full_text_parts)
 

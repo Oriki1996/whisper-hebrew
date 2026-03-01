@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Whisper עברית — תמלול הרצאות</title>
   <link rel="stylesheet" href="/static/style.css">
+  <script src="https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.min.js"></script>
 </head>
 <body>
   <header class="app-header">
@@ -17,12 +18,13 @@
   <main class="main-content">
     <!-- Tabs -->
     <div class="tabs" role="tablist">
-      <button class="tab active" data-tab="single" role="tab" aria-selected="true">קובץ בודד</button>
-      <button class="tab" data-tab="batch" role="tab" aria-selected="false">תיקייה שלמה</button>
-      <button class="tab" data-tab="settings" role="tab" aria-selected="false">⚙ הגדרות</button>
+      <button class="tab active" data-tab="single"   role="tab" aria-selected="true">קובץ בודד</button>
+      <button class="tab"        data-tab="batch"    role="tab" aria-selected="false">תיקייה שלמה</button>
+      <button class="tab"        data-tab="library"  role="tab" aria-selected="false">📚 ספרייה</button>
+      <button class="tab"        data-tab="settings" role="tab" aria-selected="false">⚙ הגדרות</button>
     </div>
 
-    <!-- Tab: Single file -->
+    <!-- ── Tab: Single file ──────────────────────────────────────────────── -->
     <section id="tab-single" class="tab-panel active" role="tabpanel">
       <div class="card">
         <div id="drop-zone" class="drop-zone" tabindex="0" role="button"
@@ -63,6 +65,16 @@
             <span class="toggle-slider"></span>
           </label>
         </div>
+        <div class="option-row toggle-row">
+          <label class="toggle-label">
+            <span>זיהוי דוברים (Speaker Diarization)</span>
+            <span class="toggle-hint">(דורש HF_TOKEN ב-.env + pyannote)</span>
+          </label>
+          <label class="toggle-track">
+            <input type="checkbox" id="diarize-toggle">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
       </div>
 
       <button id="start-btn" class="btn-primary" disabled>
@@ -70,7 +82,7 @@
       </button>
     </section>
 
-    <!-- Tab: Batch -->
+    <!-- ── Tab: Batch ─────────────────────────────────────────────────────── -->
     <section id="tab-batch" class="tab-panel" role="tabpanel" hidden>
       <div class="card">
         <label for="folder-input">נתיב תיקייה</label>
@@ -104,12 +116,32 @@
         </div>
       </div>
 
-      <button id="batch-btn" class="btn-primary">
-        📂 עבד תיקייה
-      </button>
+      <button id="batch-btn" class="btn-primary">📂 עבד תיקייה</button>
     </section>
 
-    <!-- Tab: Settings -->
+    <!-- ── Tab: Library ───────────────────────────────────────────────────── -->
+    <section id="tab-library" class="tab-panel" role="tabpanel" hidden>
+      <div class="card library-search-card">
+        <div class="library-search-row">
+          <input type="text" id="search-input" placeholder="חפש בכל ההרצאות..." dir="rtl">
+          <select id="search-mode">
+            <option value="both">סמנטי + לקסיקלי</option>
+            <option value="semantic">סמנטי</option>
+            <option value="lexical">לקסיקלי</option>
+          </select>
+          <button id="search-btn" class="btn-secondary">🔍 חפש</button>
+        </div>
+        <div id="search-results" class="search-results hidden"></div>
+      </div>
+
+      <div id="library-loading" class="library-empty">טוען ספרייה...</div>
+      <div id="library-empty"  class="library-empty hidden">
+        אין הרצאות בספרייה עדיין.<br>תמלל קובץ בטאב "קובץ בודד" כדי להתחיל.
+      </div>
+      <div id="library-grid" class="library-grid hidden"></div>
+    </section>
+
+    <!-- ── Tab: Settings ─────────────────────────────────────────────────── -->
     <section id="tab-settings" class="tab-panel" role="tabpanel" hidden>
       <div class="card">
         <h2>מפתח Anthropic API</h2>
@@ -122,9 +154,19 @@
         </button>
         <div id="key-status" class="status-msg hidden"></div>
       </div>
+
+      <div class="card" style="margin-top:16px">
+        <h2>HuggingFace Token (לדיאריזציה)</h2>
+        <p class="hint">
+          נדרש לזיהוי דוברים עם pyannote-audio.<br>
+          1. קבל גישה למודל ב-<a href="https://huggingface.co/pyannote/speaker-diarization-3.1"
+             target="_blank" rel="noopener">HuggingFace</a><br>
+          2. הוסף <code>HF_TOKEN=hf_...</code> לקובץ <code>.env</code>
+        </p>
+      </div>
     </section>
 
-    <!-- Progress -->
+    <!-- ── Progress ───────────────────────────────────────────────────────── -->
     <div id="progress-section" class="card progress-card hidden">
       <div class="progress-header">
         <span id="progress-label">מתמלל...</span>
@@ -137,9 +179,18 @@
       <p id="progress-msg" class="progress-msg" aria-live="polite"></p>
     </div>
 
-    <!-- Result -->
+    <!-- ── Result ─────────────────────────────────────────────────────────── -->
     <div id="result-section" class="card result-card hidden">
-      <!-- Media player -->
+      <!-- WaveSurfer waveform (shown for audio; video falls back to <video>) -->
+      <div id="waveform-wrap" class="waveform-wrap hidden">
+        <div id="waveform"></div>
+        <div class="waveform-controls">
+          <button id="ws-play-btn" class="btn-secondary btn-sm">▶ נגן</button>
+          <span id="ws-time" class="ws-time">0:00 / 0:00</span>
+        </div>
+      </div>
+
+      <!-- Fallback video player -->
       <div id="player-wrap" class="player-wrap hidden">
         <video id="media-player" controls preload="metadata"></video>
       </div>
@@ -147,18 +198,19 @@
       <div class="result-header">
         <h2>תמלול</h2>
         <div class="result-actions">
-          <button id="insights-btn" class="btn-secondary btn-sm">✨ נתח הרצאה</button>
-          <button id="copy-btn" class="btn-secondary btn-sm">📋 העתק</button>
+          <button id="insights-btn"     class="btn-secondary btn-sm">✨ נתח הרצאה</button>
+          <button id="anki-btn"         class="btn-secondary btn-sm hidden">⬇ Anki</button>
+          <button id="obsidian-btn"     class="btn-secondary btn-sm hidden">📝 Obsidian</button>
+          <button id="copy-btn"         class="btn-secondary btn-sm">📋 העתק</button>
           <button id="download-txt-btn" class="btn-secondary btn-sm">⬇ TXT</button>
           <button id="download-srt-btn" class="btn-secondary btn-sm">⬇ SRT</button>
         </div>
       </div>
       <div class="result-badges">
         <span id="badge-fixed" class="badge badge-claude hidden">✨ תוקן על ידי Claude</span>
-        <span id="badge-raw" class="badge badge-raw hidden">📝 תמלול גולמי (Whisper)</span>
+        <span id="badge-raw"   class="badge badge-raw   hidden">📝 תמלול גולמי (Whisper)</span>
       </div>
 
-      <!-- Interactive transcript (replaces textarea) -->
       <div id="transcript-container" class="transcript-container" dir="rtl"
            aria-label="טקסט תמלול" role="region" aria-live="polite"></div>
     </div>
@@ -169,8 +221,7 @@
         <h2>✨ ניתוח הרצאה</h2>
         <span id="insights-spinner" class="insights-spinner hidden"></span>
       </div>
-      <div id="insights-container" class="insights-container" dir="rtl"
-           aria-live="polite"></div>
+      <div id="insights-body" class="insights-body" dir="rtl"></div>
     </div>
   </main>
 
