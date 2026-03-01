@@ -662,3 +662,128 @@ input:focus { outline: 2px solid var(--primary); }
 label { display: block; font-weight: 600; font-size: 0.88rem; color: var(--text-muted); margin-bottom: 6px; }
 
 h2 { font-size: 1.15rem; color: var(--text); margin: 0 0 8px; }
+
+/* ── Citations & References ──────────────────────────────────────────────── */
+
+/* Inline highlight spans in transcript */
+.cite-hl {
+  background: rgba(200, 129, 58, 0.18);
+  border-bottom: 2px solid var(--primary);
+  border-radius: 2px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.cite-hl:hover {
+  background: rgba(200, 129, 58, 0.35);
+}
+.cite-hl[data-type="author"]  { border-color: #5b8dd9; background: rgba(91,141,217,0.15); }
+.cite-hl[data-type="book"]    { border-color: #0f9f72; background: rgba(15,159,114,0.13); }
+.cite-hl[data-type="law"]     { border-color: #b05fbf; background: rgba(176,95,191,0.13); }
+.cite-hl[data-type="case"]    { border-color: #d9845b; background: rgba(217,132,91,0.15); }
+
+/* Citation popup */
+.cite-popup {
+  position: fixed;
+  z-index: 1000;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 24px rgba(0,0,0,0.15);
+  padding: 14px 16px 10px;
+  max-width: 320px;
+  min-width: 220px;
+  font-size: 0.88rem;
+  direction: rtl;
+}
+#cite-popup-content {
+  margin-bottom: 8px;
+  line-height: 1.5;
+}
+.cite-popup-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: space-between;
+}
+.cite-popup-link {
+  color: var(--primary);
+  font-size: 0.82rem;
+  text-decoration: none;
+}
+.cite-popup-link:hover { text-decoration: underline; }
+.cite-popup-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.cite-popup-close:hover { background: var(--bg); }
+
+/* References panel below transcript */
+.references-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  margin-top: 12px;
+}
+.references-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.references-header h3 {
+  margin: 0;
+  font-size: 1rem;
+  color: var(--text);
+  flex: 1;
+}
+.references-body { line-height: 1.7; }
+
+/* Entity type sections inside references */
+.ref-section { margin-bottom: 16px; }
+.ref-section h4 {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0 0 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.ref-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 5px 0;
+  font-size: 0.9rem;
+}
+.ref-item-label { flex: 1; }
+.ref-item-ts {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  direction: ltr;
+}
+.ref-zotero-link {
+  font-size: 0.78rem;
+  color: var(--primary);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.ref-zotero-link:hover { text-decoration: underline; }
+.ref-type-badge {
+  font-size: 0.7rem;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.badge-author { background: rgba(91,141,217,0.18); color: #3a6ab5; }
+.badge-book   { background: rgba(15,159,114,0.15); color: #0a7a56; }
+.badge-law    { background: rgba(176,95,191,0.15); color: #8b3fa0; }
+.badge-case   { background: rgba(217,132,91,0.18); color: #a84e20; }

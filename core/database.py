@@ -53,9 +53,16 @@ def init_db() -> None:
             key_terms   TEXT,       -- JSON [{term, definition}]
             anki_cards  TEXT,       -- JSON [{front, back}]
             citations   TEXT,       -- JSON [{author, title, year, context}]
+            entities    TEXT,       -- JSON {authors, books, laws, cases} from NER
             created_at  TEXT    DEFAULT (datetime('now'))
         );
         """)
+    # Safe migration: add entities column to existing DBs
+    with _conn() as conn:
+        try:
+            conn.execute("ALTER TABLE insights ADD COLUMN entities TEXT")
+        except Exception:
+            pass  # column already exists
 
 
 # ── Lectures ──────────────────────────────────────────────────────────────────
@@ -203,7 +210,73 @@ def get_insights(lecture_id: int) -> Optional[dict]:
     d["key_terms"] = json.loads(d.get("key_terms") or "[]")
     d["anki_cards"] = json.loads(d.get("anki_cards") or "[]")
     d["citations"] = json.loads(d.get("citations") or "[]")
+    d["entities"]  = json.loads(d.get("entities") or "{}")
     return d
+
+
+def save_entities(lecture_id: int, entities: dict) -> None:
+    """Save/replace NER entities dict for a lecture."""
+    serialised = json.dumps(entities, ensure_ascii=False)
+    with _conn() as conn:
+        existing = conn.execute(
+            "SELECT id FROM insights WHERE lecture_id = ?", (lecture_id,)
+        ).fetchone()
+        if existing:
+            conn.execute(
+                "UPDATE insights SET entities = ? WHERE lecture_id = ?",
+                (serialised, lecture_id),
+            )
+        else:
+            conn.execute(
+                "INSERT INTO insights (lecture_id, entities) VALUES (?, ?)",
+                (lecture_id, serialised),
+            )
+
+
+def get_entities(lecture_id: int) -> dict:
+    """Return the entities dict for a lecture (empty dict if none)."""
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT entities FROM insights WHERE lecture_id = ?", (lecture_id,)
+        ).fetchone()
+    if not row or not row["entities"]:
+        return {}
+    return json.loads(row["entities"])
+
+
+def get_all_citations() -> list[dict]:
+    """
+    Return a global bibliography: all entities across all lectures,
+    tagged with lecture filename, course_name, and lecture_id.
+    Useful for the Library > Bibliography view.
+    """
+    with _conn() as conn:
+        rows = conn.execute(
+            """SELECT i.lecture_id, i.entities,
+                      l.filename, l.course_name
+               FROM insights i
+               JOIN lectures l ON l.id = i.lecture_id
+               WHERE i.entities IS NOT NULL AND i.entities != '{}'"""
+        ).fetchall()
+
+    bibliography: dict = {"authors": [], "books": [], "laws": [], "cases": []}
+    seen: dict = {k: set() for k in bibliography}
+
+    for row in rows:
+        entities = json.loads(row["entities"] or "{}")
+        tag = {
+            "lecture_id":   row["lecture_id"],
+            "filename":     row["filename"],
+            "course_name":  row["course_name"] or "",
+        }
+        for key in bibliography:
+            for item in entities.get(key, []):
+                label = (item.get("name") or item.get("title") or "").strip()
+                if label and label not in seen[key]:
+                    seen[key].add(label)
+                    bibliography[key].append({**item, **tag})
+
+    return bibliography
 
 
 # ── Search ────────────────────────────────────────────────────────────────────

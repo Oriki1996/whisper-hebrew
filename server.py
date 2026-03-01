@@ -239,6 +239,70 @@ def api_library_insights(lid):
         return jsonify({"error": str(e)}), 500
 
 
+# ── Citations / Bibliography / Zotero ─────────────────────────────────────────
+@app.route("/api/library/<int:lid>/citations/extract", methods=["POST"])
+def api_citations_extract(lid):
+    """
+    Run NER + Zotero matching for a stored lecture and persist the result.
+    Body (optional): { "zotero": true|false }  — default true (run Zotero matching)
+    Returns: { entities: {...} }
+    """
+    from core.database import get_lecture, get_segments, save_entities
+    lecture = get_lecture(lid)
+    if not lecture:
+        return jsonify({"error": "לא נמצא"}), 404
+    text = lecture.get("full_fixed_text") or lecture.get("full_raw_text", "")
+    if not text:
+        return jsonify({"error": "אין טקסט לניתוח"}), 400
+
+    data          = request.get_json(silent=True) or {}
+    run_zotero    = data.get("zotero", True)
+    segments      = get_segments(lid)
+
+    try:
+        from core.citation_engine import extract_citations
+        entities = extract_citations(text, segments=segments)
+
+        if run_zotero:
+            try:
+                from core.zotero_link import match_entities
+                entities = match_entities(entities)
+            except Exception as ze:
+                print(f"  ⚠ Zotero matching skipped: {ze}", flush=True)
+
+        save_entities(lid, entities)
+        return jsonify({"ok": True, "entities": entities})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/bibliography", methods=["GET"])
+def api_bibliography():
+    """Return global bibliography across all lectures."""
+    from core.database import init_db, get_all_citations
+    init_db()
+    return jsonify(get_all_citations())
+
+
+@app.route("/api/zotero/match", methods=["POST"])
+def api_zotero_match():
+    """
+    Fuzzy-match a single query string against the Zotero library.
+    Body: { "query": str, "type": "title"|"author" }
+    Returns: list of up to 5 matches with zotero_uri.
+    """
+    data  = request.get_json(silent=True) or {}
+    query = data.get("query", "").strip()
+    etype = data.get("type", "title")
+    if not query:
+        return jsonify({"error": "שאילתה ריקה"}), 400
+    try:
+        from core.zotero_link import match_single
+        return jsonify(match_single(query, entity_type=etype))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # ── Export ────────────────────────────────────────────────────────────────────
 @app.route("/api/library/<int:lid>/anki")
 def api_anki_export(lid):
@@ -261,17 +325,19 @@ def api_anki_export(lid):
 
 @app.route("/api/library/<int:lid>/obsidian")
 def api_obsidian_export(lid):
-    from core.database import get_lecture, get_segments, get_insights
+    from core.database import get_lecture, get_segments, get_insights, get_entities
     lecture = get_lecture(lid)
     if not lecture:
         return jsonify({"error": "לא נמצא"}), 404
     segments = get_segments(lid)
     insights = get_insights(lid)
+    entities = get_entities(lid)
 
     def _fmt(sec: float) -> str:
-        m = int(sec) // 60
+        h = int(sec) // 3600
+        m = int(sec) // 60 % 60
         s = int(sec) % 60
-        return f"{m:02d}:{s:02d}"
+        return f"{h}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
 
     lines = [
         f"# {lecture.get('filename', 'הרצאה')}",
@@ -303,7 +369,48 @@ def api_obsidian_export(lid):
             lines.append(f"[{_fmt(seg.get('start_time', 0))}] {seg.get('text', '')}")
         lines += ["", "---", ""]
 
-    if insights and insights.get("citations"):
+    # NER-based references (with timestamps)
+    if entities:
+        lines += ["## רשימת מקורות", ""]
+        ref_num = 1
+
+        def _ts_note(timestamps: list) -> str:
+            if not timestamps:
+                return ""
+            ts_str = " · ".join(_fmt(t) for t in timestamps[:4])
+            return f"  *(מוזכר ב: {ts_str})*"
+
+        for author in entities.get("authors", []):
+            field = f" ({author['field']})" if author.get("field") else ""
+            zuri  = f" → [{author['zotero_key']}]({author['zotero_uri']})" if author.get("zotero_uri") else ""
+            ts    = _ts_note(author.get("timestamps", []))
+            lines.append(f"{ref_num}. **{author['name']}**{field}{zuri}{ts}")
+            ref_num += 1
+
+        for book in entities.get("books", []):
+            author_str = f" — {book['author']}" if book.get("author") else ""
+            year_str   = f" ({book['year']})" if book.get("year") else ""
+            zuri       = f" → [{book.get('zotero_key','')}]({book['zotero_uri']})" if book.get("zotero_uri") else ""
+            ts         = _ts_note(book.get("timestamps", []))
+            lines.append(f"{ref_num}. *{book['title']}*{author_str}{year_str}{zuri}{ts}")
+            ref_num += 1
+
+        for law in entities.get("laws", []):
+            yr  = f" ({law['year']})" if law.get("year") else ""
+            jur = f" — {law['jurisdiction']}" if law.get("jurisdiction") else ""
+            ts  = _ts_note(law.get("timestamps", []))
+            lines.append(f"{ref_num}. **{law['name']}**{yr}{jur}{ts}")
+            ref_num += 1
+
+        for case in entities.get("cases", []):
+            court = f" ({case['court']})" if case.get("court") else ""
+            yr    = f" {case['year']}" if case.get("year") else ""
+            ts    = _ts_note(case.get("timestamps", []))
+            lines.append(f"{ref_num}. *{case['name']}*{court}{yr}{ts}")
+            ref_num += 1
+
+    elif insights and insights.get("citations"):
+        # Fallback to AI-insights citations if no NER entities yet
         lines += ["## מקורות", ""]
         for c in insights["citations"]:
             ref = f"- {c.get('author','')}"

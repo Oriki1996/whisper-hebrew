@@ -140,6 +140,15 @@
         אין הרצאות בספרייה עדיין.<br>תמלל קובץ בטאב "קובץ בודד" כדי להתחיל.
       </div>
       <div id="library-grid" class="library-grid hidden"></div>
+
+      <!-- Global Bibliography -->
+      <div id="bibliography-wrap" class="card hidden" style="margin-top:16px">
+        <div class="references-header">
+          <h3>📚 ביבליוגרפיה כוללת</h3>
+          <button id="bibliography-btn" class="btn-secondary btn-sm">רענן</button>
+        </div>
+        <div id="bibliography-body" class="references-body" dir="rtl"></div>
+      </div>
     </section>
 
     <!-- ── Tab: Chat ─────────────────────────────────────────────────────── -->
@@ -239,6 +248,7 @@
         <h2>תמלול</h2>
         <div class="result-actions">
           <button id="insights-btn"     class="btn-secondary btn-sm">✨ נתח הרצאה</button>
+          <button id="citations-btn"    class="btn-secondary btn-sm hidden">🔖 חלץ מקורות</button>
           <button id="anki-btn"         class="btn-secondary btn-sm hidden">⬇ Anki</button>
           <button id="obsidian-btn"     class="btn-secondary btn-sm hidden">📝 Obsidian</button>
           <button id="copy-btn"         class="btn-secondary btn-sm">📋 העתק</button>
@@ -253,6 +263,26 @@
 
       <div id="transcript-container" class="transcript-container" dir="rtl"
            aria-label="טקסט תמלול" role="region" aria-live="polite"></div>
+
+      <!-- References panel (shown after citation extraction) -->
+      <div id="references-panel" class="references-panel hidden">
+        <div class="references-header">
+          <h3>🔖 מקורות שהוזכרו בהרצאה</h3>
+          <span id="references-spinner" class="insights-spinner hidden"></span>
+        </div>
+        <div id="references-body" class="references-body" dir="rtl"></div>
+      </div>
+    </div>
+
+    <!-- Citation popup (tooltip on highlight click) -->
+    <div id="cite-popup" class="cite-popup hidden" role="tooltip">
+      <div id="cite-popup-content"></div>
+      <div class="cite-popup-actions">
+        <a id="cite-popup-zotero" href="#" class="cite-popup-link hidden" target="_blank">
+          📚 פתח ב-Zotero
+        </a>
+        <button id="cite-popup-close" class="cite-popup-close">✕</button>
+      </div>
     </div>
 
     <!-- AI Insights -->

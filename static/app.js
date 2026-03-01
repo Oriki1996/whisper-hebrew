@@ -83,6 +83,14 @@ const badgeRaw          = document.getElementById('badge-raw');
 const insightsSec       = document.getElementById('insights-section');
 const insightsBody      = document.getElementById('insights-body');
 const insightsSpinner   = document.getElementById('insights-spinner');
+const citationsBtn      = document.getElementById('citations-btn');
+const referencesPanel   = document.getElementById('references-panel');
+const referencesBody    = document.getElementById('references-body');
+const referencesSpinner = document.getElementById('references-spinner');
+const citePopup         = document.getElementById('cite-popup');
+const citePopupContent  = document.getElementById('cite-popup-content');
+const citePopupZotero   = document.getElementById('cite-popup-zotero');
+const citePopupClose    = document.getElementById('cite-popup-close');
 
 // Library
 const libraryLoading    = document.getElementById('library-loading');
@@ -217,9 +225,11 @@ function showResult(result) {
   badgeFixed.classList.toggle('hidden', !result.fixed);
   badgeRaw.classList.toggle('hidden', result.fixed);
 
-  // Show Anki/Obsidian buttons if lecture is in library
+  // Show Anki/Obsidian/Citations buttons if lecture is in library
   ankiBtn.classList.toggle('hidden', !currentLectureId);
   obsidianBtn.classList.toggle('hidden', !currentLectureId);
+  citationsBtn.classList.toggle('hidden', !currentLectureId);
+  referencesPanel.classList.add('hidden');
 
   // ── Media / WaveSurfer ──────────────────────────────────────────────────────
   if (result.audio_url) {
@@ -638,6 +648,8 @@ async function _openLibraryLecture(lid) {
     badgeRaw.classList.toggle('hidden',   !!data.lecture.full_fixed_text);
     ankiBtn.classList.remove('hidden');
     obsidianBtn.classList.remove('hidden');
+    citationsBtn.classList.remove('hidden');
+    referencesPanel.classList.add('hidden');
 
     waveformWrap.classList.add('hidden');
     playerWrap.classList.add('hidden');
@@ -659,6 +671,14 @@ async function _openLibraryLecture(lid) {
       insightsBody.innerHTML = '';
       _renderInsights(data.insights);
       insightsSec.classList.remove('hidden');
+    }
+
+    // Show stored citation entities if available
+    const entities = data.insights?.entities;
+    if (entities && Object.values(entities).some(arr => arr.length)) {
+      _highlightCitations(entities);
+      _renderReferences(entities);
+      referencesPanel.classList.remove('hidden');
     }
   } catch (e) {
     alert('שגיאה בפתיחת הרצאה: ' + e.message);
@@ -926,6 +946,234 @@ function _escapeHtml(str) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
 }
+
+// ── Citations ─────────────────────────────────────────────────────────────────
+
+// Button: extract citations for current lecture
+citationsBtn.addEventListener('click', async () => {
+  if (!currentLectureId) return;
+  citationsBtn.disabled = true;
+  referencesPanel.classList.remove('hidden');
+  referencesBody.innerHTML = '<em style="color:var(--text-muted)">מחלץ ישויות אקדמיות...</em>';
+  referencesSpinner.classList.remove('hidden');
+
+  try {
+    const res  = await fetch(`/api/library/${currentLectureId}/citations/extract`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+    });
+    const data = await res.json();
+    if (data.ok) {
+      _highlightCitations(data.entities);
+      _renderReferences(data.entities);
+    } else {
+      referencesBody.innerHTML = `<p class="insights-error">שגיאה: ${data.error}</p>`;
+    }
+  } catch (e) {
+    referencesBody.innerHTML = `<p class="insights-error">שגיאת חיבור: ${e.message}</p>`;
+  } finally {
+    referencesSpinner.classList.add('hidden');
+    citationsBtn.disabled = false;
+    referencesPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+});
+
+/**
+ * Wrap occurrences of every entity name/title in the transcript with
+ * <mark class="cite-hl" data-type="..." data-idx="..."> spans.
+ */
+function _highlightCitations(entities) {
+  // Build a list of {label, type, entityIdx} sorted by label length desc
+  // (so longer names match before substrings)
+  const targets = [];
+  const typeMap = { authors: 'author', books: 'book', laws: 'law', cases: 'case' };
+  for (const [key, arr] of Object.entries(entities)) {
+    const type = typeMap[key] || key;
+    arr.forEach((ent, idx) => {
+      const label = (ent.name || ent.title || '').trim();
+      if (label.length >= 3) targets.push({ label, type, idx });
+    });
+  }
+  targets.sort((a, b) => b.label.length - a.label.length);
+
+  // Walk segment spans and inject highlights (text-node level)
+  for (const span of segmentSpans) {
+    _highlightInNode(span, targets, entities);
+  }
+}
+
+function _highlightInNode(parentEl, targets, entities) {
+  // Collect text nodes
+  const walker = document.createTreeWalker(parentEl, NodeFilter.SHOW_TEXT);
+  const textNodes = [];
+  let node;
+  while ((node = walker.nextNode())) textNodes.push(node);
+
+  for (const textNode of textNodes) {
+    const text = textNode.nodeValue;
+    if (!text.trim()) continue;
+
+    let replaced = false;
+    let html = _escapeHtml(text);
+
+    for (const { label, type, idx } of targets) {
+      const escaped = _escapeHtml(label);
+      const re = new RegExp(escaped.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+      if (re.test(html)) {
+        html = html.replace(re,
+          `<mark class="cite-hl" data-type="${type}" data-idx="${idx}" tabindex="0">${escaped}</mark>`
+        );
+        replaced = true;
+      }
+    }
+
+    if (replaced) {
+      const frag = document.createRange().createContextualFragment(html);
+      // Attach popup listeners to new marks
+      frag.querySelectorAll('.cite-hl').forEach(mark => {
+        const type = mark.dataset.type;
+        const idx  = parseInt(mark.dataset.idx, 10);
+        const typeKey = { author: 'authors', book: 'books', law: 'laws', case: 'cases' }[type];
+        const entity  = entities[typeKey]?.[idx];
+        if (entity) {
+          mark.addEventListener('click', e => _showCitePopup(entity, type, e));
+          mark.addEventListener('keydown', e => {
+            if (e.key === 'Enter' || e.key === ' ') _showCitePopup(entity, type, e);
+          });
+        }
+      });
+      textNode.parentNode.replaceChild(frag, textNode);
+    }
+  }
+}
+
+// ── Citation popup ────────────────────────────────────────────────────────────
+citePopupClose.addEventListener('click', () => citePopup.classList.add('hidden'));
+document.addEventListener('click', e => {
+  if (!citePopup.contains(e.target) && !e.target.classList.contains('cite-hl')) {
+    citePopup.classList.add('hidden');
+  }
+});
+
+function _showCitePopup(entity, type, event) {
+  event.stopPropagation();
+
+  const typeLabels = { author: 'חוקר/תיאורטיקן', book: 'ספר/מאמר', law: 'חקיקה', case: 'פסיקה' };
+  let html = `<strong>${_escapeHtml(entity.name || entity.title || '')}</strong>`;
+  html += ` <em style="color:var(--text-muted);font-size:.8rem">(${typeLabels[type] || type})</em><br>`;
+
+  if (entity.field)        html += `תחום: ${_escapeHtml(entity.field)}<br>`;
+  if (entity.author)       html += `מחבר: ${_escapeHtml(entity.author)}<br>`;
+  if (entity.year)         html += `שנה: ${_escapeHtml(entity.year)}<br>`;
+  if (entity.jurisdiction) html += `סמכות: ${_escapeHtml(entity.jurisdiction)}<br>`;
+  if (entity.court)        html += `בית-משפט: ${_escapeHtml(entity.court)}<br>`;
+  if (entity.context)      html += `<em style="color:var(--text-muted)">"${_escapeHtml(entity.context)}"</em>`;
+
+  citePopupContent.innerHTML = html;
+
+  if (entity.zotero_uri) {
+    citePopupZotero.href = entity.zotero_uri;
+    citePopupZotero.classList.remove('hidden');
+  } else {
+    citePopupZotero.classList.add('hidden');
+  }
+
+  // Position near the click
+  const rect    = event.target.getBoundingClientRect();
+  const popW    = 320;
+  const scrollY = window.scrollY || 0;
+  let left      = rect.left + window.scrollX;
+  if (left + popW > window.innerWidth - 8) left = window.innerWidth - popW - 8;
+  citePopup.style.top  = (rect.bottom + scrollY + 6) + 'px';
+  citePopup.style.left = left + 'px';
+  citePopup.classList.remove('hidden');
+}
+
+// ── References panel render ───────────────────────────────────────────────────
+function _renderReferences(entities, targetEl) {
+  targetEl = targetEl || referencesBody;
+  const typeLabels = {
+    authors: { label: 'חוקרים ותיאורטיקנים', cls: 'badge-author', icon: '👤' },
+    books:   { label: 'ספרים ומאמרים',        cls: 'badge-book',   icon: '📖' },
+    laws:    { label: 'חקיקה ורגולציה',        cls: 'badge-law',    icon: '⚖' },
+    cases:   { label: 'פסיקה משפטית',          cls: 'badge-case',   icon: '🏛' },
+  };
+
+  const parts = [];
+
+  for (const [key, arr] of Object.entries(typeLabels)) {
+    const items = entities[key] || [];
+    if (!items.length) continue;
+
+    const { label, cls, icon } = arr;
+    let sec = `<div class="ref-section">
+      <h4>${icon} ${label}</h4>`;
+
+    for (const ent of items) {
+      const name   = _escapeHtml(ent.name || ent.title || '');
+      const sub    = _escapeHtml(ent.field || ent.author || ent.jurisdiction || ent.court || '');
+      const year   = ent.year ? ` (${_escapeHtml(ent.year)})` : '';
+      const ts     = (ent.timestamps || []).slice(0, 4).map(t => {
+        const m = Math.floor(t / 60), s = Math.floor(t % 60);
+        return `${m}:${s.toString().padStart(2,'0')}`;
+      }).join(' · ');
+      const zuri   = ent.zotero_uri
+        ? `<a class="ref-zotero-link" href="${ent.zotero_uri}" target="_blank">📚 Zotero</a>`
+        : '';
+
+      sec += `<div class="ref-item">
+        <span class="ref-type-badge ${cls}">${icon}</span>
+        <span class="ref-item-label">
+          <strong>${name}</strong>${sub ? ' — <em>' + sub + '</em>' : ''}${year}
+        </span>
+        ${ts ? `<span class="ref-item-ts">${ts}</span>` : ''}
+        ${zuri}
+      </div>`;
+    }
+    sec += '</div>';
+    parts.push(sec);
+  }
+
+  targetEl.innerHTML = parts.length
+    ? parts.join('')
+    : '<em style="color:var(--text-muted)">לא נמצאו ישויות אקדמיות.</em>';
+}
+
+// ── Global Bibliography (Library tab) ─────────────────────────────────────────
+const bibliographyWrap = document.getElementById('bibliography-wrap');
+const bibliographyBody = document.getElementById('bibliography-body');
+const bibliographyBtn  = document.getElementById('bibliography-btn');
+
+bibliographyBtn.addEventListener('click', loadBibliography);
+
+async function loadBibliography() {
+  bibliographyBody.innerHTML = '<em style="color:var(--text-muted)">טוען...</em>';
+  bibliographyWrap.classList.remove('hidden');
+  try {
+    const res  = await fetch('/api/bibliography');
+    const data = await res.json();
+    const total = Object.values(data).reduce((n, arr) => n + arr.length, 0);
+    if (!total) {
+      bibliographyBody.innerHTML = '<em style="color:var(--text-muted)">אין נתוני מקורות — הרץ "חלץ מקורות" על הרצאות בספרייה.</em>';
+      return;
+    }
+    _renderReferences(data, bibliographyBody);
+  } catch (e) {
+    bibliographyBody.innerHTML = `<p class="insights-error">שגיאה: ${e.message}</p>`;
+  }
+}
+
+// Show bibliography panel and load when switching to library tab
+document.querySelectorAll('.tab').forEach(tab => {
+  if (tab.dataset.tab === 'library') {
+    tab.addEventListener('click', () => {
+      // Let loadLibrary() run first (already attached above), then check bib
+      // Only auto-load bibliography if it was previously shown
+      if (bibliographyWrap && !bibliographyWrap.classList.contains('hidden')) {
+        loadBibliography();
+      }
+    });
+  }
+});
 
 // ── Anki table CSS (injected once) ───────────────────────────────────────────
 (function () {
