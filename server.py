@@ -64,6 +64,13 @@ def static_files(filename):
     return send_from_directory("static", filename)
 
 
+@app.route("/output/<path:filename>")
+def serve_output(filename):
+    """Serve files from the output directory (audio/video for in-browser playback)."""
+    output_dir = Path("output").resolve()
+    return send_from_directory(str(output_dir), filename)
+
+
 @app.route("/api/transcribe", methods=["POST"])
 def api_transcribe():
     """
@@ -93,7 +100,9 @@ def api_transcribe():
         uploaded = request.files["file"]
         tmp_dir = Path("output") / "tmp"
         tmp_dir.mkdir(parents=True, exist_ok=True)
-        tmp_path = tmp_dir / uploaded.filename
+        # Use only the basename to avoid path traversal
+        safe_name = Path(uploaded.filename).name
+        tmp_path = tmp_dir / safe_name
         uploaded.save(str(tmp_path))
         thread = threading.Thread(
             target=_run_single_job,
@@ -178,11 +187,16 @@ def _run_single_job(jid: str, file_path: Path, model: str, lang: str, fix: bool)
             except Exception as e:
                 result["fix_error"] = str(e)
 
+        # Build browser-accessible audio URL (served via /output/tmp/<name>)
+        audio_url = "/output/tmp/" + Path(file_path).name
+
         _push(jid, 1.0, "הושלם!", done=True, result={
             "text": result.get("fixed_text") or result["text"],
             "raw_text": result["text"],
+            "segments": result["segments"],
             "txt_path": result["txt_path"],
             "srt_path": result["srt_path"],
+            "audio_url": audio_url,
             "fixed": "fixed_text" in result,
         })
 

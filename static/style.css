@@ -250,6 +250,18 @@ input:focus { outline: 2px solid var(--primary); }
   direction: rtl;
 }
 
+/* ── Media player ────────────────────────────────────────────────────────── */
+.player-wrap {
+  margin-bottom: 16px;
+}
+.player-wrap video {
+  width: 100%;
+  border-radius: 10px;
+  background: #000;
+  max-height: 260px;
+  display: block;
+}
+
 /* ── Result ──────────────────────────────────────────────────────────────── */
 .result-card {}
 .result-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
@@ -265,19 +277,50 @@ input:focus { outline: 2px solid var(--primary); }
 .badge-claude { background: rgba(200,129,58,0.12); color: var(--primary); }
 .badge-raw { background: rgba(107,87,64,0.10); color: var(--text-muted); }
 
-.result-textarea {
+/* ── Interactive transcript ──────────────────────────────────────────────── */
+.transcript-container {
   width: 100%;
   min-height: 280px;
-  padding: 14px;
+  max-height: 480px;
+  overflow-y: auto;
+  padding: 14px 16px;
   border: 1px solid var(--border);
   border-radius: 8px;
   font-size: 0.95rem;
-  line-height: 1.7;
+  line-height: 2;
   color: var(--text);
   background: #fdfaf7;
-  resize: vertical;
   direction: rtl;
   text-align: right;
+  scroll-behavior: smooth;
+}
+
+/* Individual transcript segment */
+.segment {
+  display: inline;
+  padding: 2px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.segment:hover {
+  background: rgba(200, 129, 58, 0.15);
+  color: var(--primary-dk);
+}
+
+.segment:active {
+  background: rgba(200, 129, 58, 0.30);
+  transform: scale(0.98);
+}
+
+/* Currently playing segment */
+.active-segment {
+  background: rgba(200, 129, 58, 0.22);
+  color: var(--primary-dk);
+  font-weight: 600;
+  box-shadow: 0 0 0 2px rgba(200, 129, 58, 0.35);
+  border-radius: 4px;
 }
 
 /* ── Status msg ──────────────────────────────────────────────────────────── */

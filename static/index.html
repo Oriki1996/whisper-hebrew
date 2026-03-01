@@ -139,6 +139,11 @@
 
     <!-- Result -->
     <div id="result-section" class="card result-card hidden">
+      <!-- Media player -->
+      <div id="player-wrap" class="player-wrap hidden">
+        <video id="media-player" controls preload="metadata"></video>
+      </div>
+
       <div class="result-header">
         <h2>תמלול</h2>
         <div class="result-actions">
@@ -151,8 +156,10 @@
         <span id="badge-fixed" class="badge badge-claude hidden">✨ תוקן על ידי Claude</span>
         <span id="badge-raw" class="badge badge-raw hidden">📝 תמלול גולמי (Whisper)</span>
       </div>
-      <textarea id="result-text" class="result-textarea" readonly dir="rtl"
-                aria-label="טקסט תמלול"></textarea>
+
+      <!-- Interactive transcript (replaces textarea) -->
+      <div id="transcript-container" class="transcript-container" dir="rtl"
+           aria-label="טקסט תמלול" role="region" aria-live="polite"></div>
     </div>
   </main>
 

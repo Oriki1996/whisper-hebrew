@@ -2,38 +2,42 @@
 'use strict';
 
 // ── State ─────────────────────────────────────────────────────────────────────
-let currentFile = null;
-let currentResult = null;
-let currentJobId = null;
+let currentFile    = null;
+let currentResult  = null;
+let currentJobId   = null;
+let segmentSpans   = [];   // array of all .segment elements in render order
+let activeSpanEl   = null; // currently highlighted span
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
-const dropZone     = document.getElementById('drop-zone');
-const fileInput    = document.getElementById('file-input');
-const fileInfo     = document.getElementById('file-info');
-const startBtn     = document.getElementById('start-btn');
-const modelSelect  = document.getElementById('model-select');
-const langSelect   = document.getElementById('lang-select');
-const fixToggle    = document.getElementById('fix-toggle');
-const batchBtn     = document.getElementById('batch-btn');
-const folderInput  = document.getElementById('folder-input');
-const batchModel   = document.getElementById('batch-model');
-const batchFix     = document.getElementById('batch-fix-toggle');
-const apiKeyInput  = document.getElementById('api-key-input');
-const saveKeyBtn   = document.getElementById('save-key-btn');
-const keyStatus    = document.getElementById('key-status');
-const progressSec  = document.getElementById('progress-section');
-const progressBar  = document.getElementById('progress-bar');
-const progressPct  = document.getElementById('progress-pct');
-const progressLbl  = document.getElementById('progress-label');
-const progressMsg  = document.getElementById('progress-msg');
-const progressAria = document.getElementById('progress-bar-aria');
-const resultSec    = document.getElementById('result-section');
-const resultText   = document.getElementById('result-text');
-const copyBtn      = document.getElementById('copy-btn');
-const dlTxtBtn     = document.getElementById('download-txt-btn');
-const dlSrtBtn     = document.getElementById('download-srt-btn');
-const badgeFixed   = document.getElementById('badge-fixed');
-const badgeRaw     = document.getElementById('badge-raw');
+const dropZone          = document.getElementById('drop-zone');
+const fileInput         = document.getElementById('file-input');
+const fileInfo          = document.getElementById('file-info');
+const startBtn          = document.getElementById('start-btn');
+const modelSelect       = document.getElementById('model-select');
+const langSelect        = document.getElementById('lang-select');
+const fixToggle         = document.getElementById('fix-toggle');
+const batchBtn          = document.getElementById('batch-btn');
+const folderInput       = document.getElementById('folder-input');
+const batchModel        = document.getElementById('batch-model');
+const batchFix          = document.getElementById('batch-fix-toggle');
+const apiKeyInput       = document.getElementById('api-key-input');
+const saveKeyBtn        = document.getElementById('save-key-btn');
+const keyStatus         = document.getElementById('key-status');
+const progressSec       = document.getElementById('progress-section');
+const progressBar       = document.getElementById('progress-bar');
+const progressPct       = document.getElementById('progress-pct');
+const progressLbl       = document.getElementById('progress-label');
+const progressMsg       = document.getElementById('progress-msg');
+const progressAria      = document.getElementById('progress-bar-aria');
+const resultSec         = document.getElementById('result-section');
+const transcriptContainer = document.getElementById('transcript-container');
+const playerWrap        = document.getElementById('player-wrap');
+const mediaPlayer       = document.getElementById('media-player');
+const copyBtn           = document.getElementById('copy-btn');
+const dlTxtBtn          = document.getElementById('download-txt-btn');
+const dlSrtBtn          = document.getElementById('download-srt-btn');
+const badgeFixed        = document.getElementById('badge-fixed');
+const badgeRaw          = document.getElementById('badge-raw');
 
 // ── Tabs ──────────────────────────────────────────────────────────────────────
 document.querySelectorAll('.tab').forEach(tab => {
@@ -164,36 +168,122 @@ function setProgress(pct, label, msg) {
 // ── Result display ────────────────────────────────────────────────────────────
 function showResult(result) {
   currentResult = result;
-  resultText.value = result.text;
+
+  // Badges
   badgeFixed.classList.toggle('hidden', !result.fixed);
   badgeRaw.classList.toggle('hidden', result.fixed);
+
+  // Media player
+  if (result.audio_url) {
+    mediaPlayer.src = result.audio_url;
+    playerWrap.classList.remove('hidden');
+  } else {
+    playerWrap.classList.add('hidden');
+  }
+
+  // Build interactive transcript from segments
+  _renderSegments(result.segments || []);
+
   resultSec.classList.remove('hidden');
-  resultText.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  transcriptContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
+
+function _renderSegments(segments) {
+  transcriptContainer.innerHTML = '';
+  segmentSpans = [];
+  activeSpanEl = null;
+
+  if (!segments.length) {
+    transcriptContainer.textContent = currentResult?.text || '';
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  for (const seg of segments) {
+    const span = document.createElement('span');
+    span.className = 'segment';
+    span.dataset.start = seg.start;
+    span.dataset.end   = seg.end;
+    span.textContent   = seg.text.trim();
+    span.title         = _formatTime(seg.start);
+
+    span.addEventListener('click', () => {
+      mediaPlayer.currentTime = seg.start;
+      mediaPlayer.play();
+    });
+
+    fragment.appendChild(span);
+    fragment.appendChild(document.createTextNode(' '));
+    segmentSpans.push(span);
+  }
+  transcriptContainer.appendChild(fragment);
+}
+
+function _formatTime(sec) {
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+// ── Audio sync: highlight active segment ──────────────────────────────────────
+mediaPlayer.addEventListener('timeupdate', () => {
+  const t = mediaPlayer.currentTime;
+
+  // Fast path: still inside the current active segment
+  if (activeSpanEl) {
+    const s = parseFloat(activeSpanEl.dataset.start);
+    const e = parseFloat(activeSpanEl.dataset.end);
+    if (t >= s && t < e) return;
+    activeSpanEl.classList.remove('active-segment');
+    activeSpanEl = null;
+  }
+
+  // Find the new active segment (linear scan — fast enough for typical lecture size)
+  for (const span of segmentSpans) {
+    const s = parseFloat(span.dataset.start);
+    const e = parseFloat(span.dataset.end);
+    if (t >= s && t < e) {
+      span.classList.add('active-segment');
+      span.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      activeSpanEl = span;
+      break;
+    }
+  }
+});
 
 function showBatchResult(result) {
   resultSec.classList.remove('hidden');
-  resultText.value = `הושלם!\n\nעובדו: ${result.processed} קבצים\nדולגו: ${result.skipped} קבצים\n\nהקבצים שמורים בתיקיית output/`;
+  playerWrap.classList.add('hidden');
+  transcriptContainer.innerHTML = '';
+  transcriptContainer.textContent =
+    `הושלם!\n\nעובדו: ${result.processed} קבצים\nדולגו: ${result.skipped} קבצים\n\nהקבצים שמורים בתיקיית output/`;
   badgeFixed.classList.add('hidden');
   badgeRaw.classList.add('hidden');
+  segmentSpans = [];
 }
 
 // ── Copy / Download ───────────────────────────────────────────────────────────
+function _fullText() {
+  // Always use the stored result text (not DOM, which may be truncated)
+  return currentResult?.text || transcriptContainer.textContent;
+}
+
 copyBtn.addEventListener('click', () => {
-  navigator.clipboard.writeText(resultText.value)
+  navigator.clipboard.writeText(_fullText())
     .then(() => flashBtn(copyBtn, '✅ הועתק!'))
     .catch(() => {});
 });
 
 dlTxtBtn.addEventListener('click', () => {
   if (!currentResult) return;
-  downloadText(resultText.value, currentResult.txt_path?.split(/[/\\]/).pop() || 'transcript.txt');
+  const filename = currentResult.txt_path?.split(/[/\\]/).pop() || 'transcript.txt';
+  downloadText(_fullText(), filename);
 });
 
 dlSrtBtn.addEventListener('click', () => {
   if (!currentResult?.srt_path) return;
-  // SRT is already saved on server; just open it
-  window.open('/output/' + currentResult.srt_path.split(/[/\\]/).pop());
+  const name = currentResult.srt_path.split(/[/\\]/).pop();
+  window.open('/output/' + name);
 });
 
 function downloadText(text, filename) {
