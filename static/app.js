@@ -8,6 +8,31 @@ let currentJobId   = null;
 let segmentSpans   = [];   // array of all .segment elements in render order
 let activeSpanEl   = null; // currently highlighted span
 
+// ── Markdown renderer (minimal, no dependencies) ──────────────────────────────
+function _renderMarkdown(md) {
+  // Headings h2/h3
+  let html = md
+    .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+    .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+    // Bold
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    // Unordered list items
+    .replace(/^[-*] (.+)$/gm, '<li>$1</li>')
+    // Numbered list items
+    .replace(/^\d+\. (.+)$/gm, '<li>$1</li>')
+    // Wrap consecutive <li> in <ul>
+    .replace(/(<li>[\s\S]*?<\/li>)(\s*<li>[\s\S]*?<\/li>)*/g, m => `<ul>${m}</ul>`)
+    // Paragraphs (double newline → <p>)
+    .split(/\n{2,}/)
+    .map(block => {
+      if (/^<(h[23]|ul|li)/.test(block.trim())) return block;
+      if (block.trim()) return `<p>${block.trim().replace(/\n/g, ' ')}</p>`;
+      return '';
+    })
+    .join('\n');
+  return html;
+}
+
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 const dropZone          = document.getElementById('drop-zone');
 const fileInput         = document.getElementById('file-input');
@@ -38,6 +63,10 @@ const dlTxtBtn          = document.getElementById('download-txt-btn');
 const dlSrtBtn          = document.getElementById('download-srt-btn');
 const badgeFixed        = document.getElementById('badge-fixed');
 const badgeRaw          = document.getElementById('badge-raw');
+const insightsBtn       = document.getElementById('insights-btn');
+const insightsSec       = document.getElementById('insights-section');
+const insightsContainer = document.getElementById('insights-container');
+const insightsSpinner   = document.getElementById('insights-spinner');
 
 // ── Tabs ──────────────────────────────────────────────────────────────────────
 document.querySelectorAll('.tab').forEach(tab => {
@@ -334,3 +363,35 @@ function showStatus(el, msg, type) {
   el.classList.remove('hidden');
   setTimeout(() => el.classList.add('hidden'), 4000);
 }
+
+// ── AI Insights ───────────────────────────────────────────────────────────────
+insightsBtn.addEventListener('click', async () => {
+  const text = _fullText();
+  if (!text) return;
+
+  insightsSec.classList.remove('hidden');
+  insightsContainer.innerHTML = '';
+  insightsSpinner.classList.remove('hidden');
+  insightsBtn.disabled = true;
+
+  insightsSec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  try {
+    const res = await fetch('/api/insights', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      insightsContainer.innerHTML = _renderMarkdown(data.markdown);
+    } else {
+      insightsContainer.innerHTML = `<p class="insights-error">שגיאה: ${data.error}</p>`;
+    }
+  } catch (e) {
+    insightsContainer.innerHTML = `<p class="insights-error">שגיאת חיבור: ${e.message}</p>`;
+  } finally {
+    insightsSpinner.classList.add('hidden');
+    insightsBtn.disabled = false;
+  }
+});

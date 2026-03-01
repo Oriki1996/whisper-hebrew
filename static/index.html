@@ -147,6 +147,7 @@
       <div class="result-header">
         <h2>תמלול</h2>
         <div class="result-actions">
+          <button id="insights-btn" class="btn-secondary btn-sm">✨ נתח הרצאה</button>
           <button id="copy-btn" class="btn-secondary btn-sm">📋 העתק</button>
           <button id="download-txt-btn" class="btn-secondary btn-sm">⬇ TXT</button>
           <button id="download-srt-btn" class="btn-secondary btn-sm">⬇ SRT</button>
@@ -160,6 +161,16 @@
       <!-- Interactive transcript (replaces textarea) -->
       <div id="transcript-container" class="transcript-container" dir="rtl"
            aria-label="טקסט תמלול" role="region" aria-live="polite"></div>
+    </div>
+
+    <!-- AI Insights -->
+    <div id="insights-section" class="card insights-card hidden">
+      <div class="insights-header">
+        <h2>✨ ניתוח הרצאה</h2>
+        <span id="insights-spinner" class="insights-spinner hidden"></span>
+      </div>
+      <div id="insights-container" class="insights-container" dir="rtl"
+           aria-live="polite"></div>
     </div>
   </main>
 

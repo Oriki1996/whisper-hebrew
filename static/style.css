@@ -333,6 +333,79 @@ input:focus { outline: 2px solid var(--primary); }
 .status-msg.success { background: rgba(15,159,114,0.10); color: var(--success); }
 .status-msg.error { background: rgba(217,58,58,0.10); color: var(--error); }
 
+/* ── AI Insights ─────────────────────────────────────────────────────────── */
+.insights-card { padding: 20px 24px; }
+
+.insights-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.insights-header h2 { margin: 0; font-size: 1.1rem; color: var(--primary); }
+
+/* Spinner */
+.insights-spinner {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border: 3px solid var(--border);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Content area */
+.insights-container {
+  line-height: 1.8;
+  color: var(--text);
+  font-size: 0.95rem;
+  direction: rtl;
+  text-align: right;
+}
+
+.insights-container h2 {
+  font-size: 1.05rem;
+  color: var(--primary);
+  border-bottom: 2px solid var(--border);
+  padding-bottom: 4px;
+  margin: 20px 0 8px;
+}
+.insights-container h2:first-child { margin-top: 0; }
+
+.insights-container h3 {
+  font-size: 0.98rem;
+  color: var(--text);
+  margin: 14px 0 6px;
+}
+
+.insights-container p {
+  margin: 0 0 10px;
+  color: var(--text);
+}
+
+.insights-container ul {
+  margin: 0 0 12px;
+  padding-right: 20px;
+  padding-left: 0;
+  list-style: disc;
+}
+
+.insights-container li {
+  margin-bottom: 6px;
+}
+
+.insights-container strong {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.insights-error {
+  color: var(--error);
+  font-size: 0.9rem;
+}
+
 /* ── Utility ─────────────────────────────────────────────────────────────── */
 .hidden { display: none !important; }
 

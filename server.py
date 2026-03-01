@@ -138,6 +138,21 @@ def api_progress(jid):
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
+@app.route("/api/insights", methods=["POST"])
+def api_insights():
+    """Generate academic insights from transcription text using Claude."""
+    data = request.get_json(silent=True) or {}
+    text = data.get("text", "").strip()
+    if not text:
+        return jsonify({"error": "טקסט ריק"}), 400
+    try:
+        from core.claude_fixer import generate_insights
+        result = generate_insights(text)
+        return jsonify({"ok": True, "markdown": result})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/settings", methods=["POST"])
 def api_settings():
     """Save Anthropic API key to .env."""

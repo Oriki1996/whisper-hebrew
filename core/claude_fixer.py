@@ -79,6 +79,78 @@ def _call_with_retry(client, chunk: str, context: str, chunk_idx: int, total: in
     raise RuntimeError(f"נכשל לאחר {MAX_RETRIES} ניסיונות: {last_error}")
 
 
+INSIGHTS_SYSTEM_PROMPT = """\
+אתה מומחה לניתוח הרצאות אקדמיות בעברית.
+קיבלת תמלול של הרצאה אקדמית. נתח אותה לעומק והפק דוח מובנה בפורמט Markdown.
+
+הדוח חייב לכלול את הסעיפים הבאים בדיוק:
+
+## סיכום תמציתי
+עיקרי הדברים בהרצאה — עד 5 פסקאות קצרות. כתוב בשפה ברורה ונגישה.
+
+## מושגי מפתח
+רשימת המונחים החשובים שהוזכרו בהרצאה, כל אחד עם הסבר קצר של 1-2 משפטים.
+
+## שאלות לתרגול
+3-5 שאלות פתוחות שיכולות להופיע במבחן על בסיס החומר. כתוב שאלות מאתגרות שדורשות הבנה ולא שינון.
+
+החזר רק את הדוח בפורמט Markdown תקני, ללא הקדמות.\
+"""
+
+
+def generate_insights(text: str, api_key: Optional[str] = None) -> str:
+    """
+    Generate academic insights from a Hebrew transcription using Claude.
+
+    Args:
+        text: Transcription text (full or truncated).
+        api_key: Anthropic API key. Falls back to ANTHROPIC_API_KEY env var.
+
+    Returns:
+        Markdown-formatted academic analysis.
+
+    Raises:
+        ValueError: If no API key is available.
+        RuntimeError: If the API call fails after retries.
+    """
+    try:
+        import anthropic
+    except ImportError:
+        raise ImportError("pip install anthropic")
+
+    from .config import get_anthropic_key
+    key = api_key or get_anthropic_key()
+    if not key:
+        raise ValueError(
+            "חסר מפתח Anthropic API. הגדר ANTHROPIC_API_KEY ב-.env או בהגדרות."
+        )
+
+    client = anthropic.Anthropic(api_key=key)
+
+    # Use up to ~80,000 chars (~20,000 Hebrew words) — enough for a full lecture
+    truncated = text[:80_000]
+    user_content = f"תמלול ההרצאה לניתוח:\n\n{truncated}"
+
+    last_error = None
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            print(f"מנתח הרצאה עם Claude (ניסיון {attempt})...", flush=True)
+            message = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=4096,
+                system=INSIGHTS_SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": user_content}],
+            )
+            return message.content[0].text.strip()
+        except Exception as e:
+            last_error = e
+            if attempt < MAX_RETRIES:
+                print(f"  ⚠ שגיאת API (ניסיון {attempt}/{MAX_RETRIES}): {e} — מנסה שוב בעוד {RETRY_DELAY}s")
+                time.sleep(RETRY_DELAY)
+
+    raise RuntimeError(f"ניתוח נכשל לאחר {MAX_RETRIES} ניסיונות: {last_error}")
+
+
 def fix_hebrew(raw_text: str, api_key: Optional[str] = None) -> str:
     """
     Correct Hebrew transcription using Claude, with chunking and context overlap.
