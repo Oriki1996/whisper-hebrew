@@ -321,6 +321,37 @@ def api_obsidian_export(lid):
 
 
 # ── Settings ──────────────────────────────────────────────────────────────────
+@app.route("/api/chat", methods=["POST"])
+def api_chat():
+    """
+    RAG chat over the lecture library.
+    Body: { question: str, history: [{role, content}], search_mode: str }
+    Returns: { answer: str, sources: [...] }
+    """
+    data    = request.get_json(silent=True) or {}
+    question = data.get("question", "").strip()
+    history  = data.get("history",  [])
+    mode     = data.get("search_mode", "both")
+
+    if not question:
+        return jsonify({"error": "שאלה ריקה"}), 400
+
+    try:
+        from core.chat_engine import answer
+        result = answer(question=question, history=history, search_mode=mode)
+        # Strip embedding bytes from sources before serialising
+        clean_sources = [
+            {k: v for k, v in s.items() if k != "embedding"}
+            for s in result["sources"]
+        ]
+        return jsonify({
+            "answer":  result["answer"],
+            "sources": clean_sources,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/settings", methods=["POST"])
 def api_settings():
     data = request.get_json(silent=True) or {}

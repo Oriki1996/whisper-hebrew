@@ -795,6 +795,138 @@ function showStatus(el, msg, type) {
   setTimeout(() => el.classList.add('hidden'), 4000);
 }
 
+// ── RAG Chat ──────────────────────────────────────────────────────────────────
+const chatMessages  = document.getElementById('chat-messages');
+const chatInput     = document.getElementById('chat-input');
+const chatSendBtn   = document.getElementById('chat-send-btn');
+const chatClearBtn  = document.getElementById('chat-clear-btn');
+const chatSearchMode= document.getElementById('chat-search-mode');
+
+let _chatHistory = [];   // [{role, content}] for multi-turn context
+
+chatSendBtn.addEventListener('click', sendChatMessage);
+chatInput.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) sendChatMessage(); });
+chatClearBtn.addEventListener('click', () => {
+  _chatHistory = [];
+  chatMessages.innerHTML = `
+    <div class="chat-welcome">
+      <p>שאל כל שאלה אקדמית — לדוגמה:</p>
+      <ul>
+        <li>«מה הוסבר על שיטת הייצוג היחסי?»</li>
+        <li>«מי תיאר את תיאוריית המשחקים?»</li>
+        <li>«סכם את השיעור על בינה מלאכותית»</li>
+      </ul>
+    </div>`;
+});
+
+async function sendChatMessage() {
+  const q = chatInput.value.trim();
+  if (!q) return;
+
+  chatInput.value = '';
+  chatSendBtn.disabled = true;
+
+  // Remove welcome message on first send
+  const welcome = chatMessages.querySelector('.chat-welcome');
+  if (welcome) welcome.remove();
+
+  // Append user bubble
+  _appendChatBubble('user', q);
+
+  // Thinking indicator
+  const thinkingEl = _appendThinking();
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+
+  // Add to history before sending
+  _chatHistory.push({ role: 'user', content: q });
+
+  try {
+    const res  = await fetch('/api/chat', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        question:    q,
+        history:     _chatHistory.slice(0, -1),  // exclude current turn (added above)
+        search_mode: chatSearchMode.value,
+      }),
+    });
+    const data = await res.json();
+    thinkingEl.remove();
+
+    if (data.error) {
+      _appendChatBubble('assistant', `⚠ שגיאה: ${data.error}`);
+    } else {
+      _appendChatBubble('assistant', data.answer, data.sources || []);
+      _chatHistory.push({ role: 'assistant', content: data.answer });
+    }
+  } catch (e) {
+    thinkingEl.remove();
+    _appendChatBubble('assistant', `⚠ שגיאת חיבור: ${e.message}`);
+  } finally {
+    chatSendBtn.disabled = false;
+    chatInput.focus();
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+  }
+}
+
+function _appendChatBubble(role, text, sources = []) {
+  const wrap = document.createElement('div');
+  wrap.className = `chat-msg chat-msg-${role}`;
+
+  const bubble = document.createElement('div');
+  bubble.className = 'chat-bubble';
+  // Simple newline handling for assistant responses
+  bubble.innerHTML = role === 'assistant'
+    ? text.replace(/\n/g, '<br>')
+    : _escapeHtml(text);
+  wrap.appendChild(bubble);
+
+  // Sources panel under assistant messages
+  if (role === 'assistant' && sources.length) {
+    const srcWrap = document.createElement('div');
+    srcWrap.className = 'chat-sources';
+    const top = sources.slice(0, 4);
+    for (const s of top) {
+      const item = document.createElement('div');
+      item.className = 'chat-source-item';
+      const ts = _fmt(s.start_time || 0);
+      item.innerHTML = `<span class="chat-source-ts">[${ts}]</span>
+        <span>${_escapeHtml(s.filename || '')}${s.course_name ? ' · ' + _escapeHtml(s.course_name) : ''}</span>`;
+      // Click to open library lecture
+      item.style.cursor = 'pointer';
+      item.addEventListener('click', () => {
+        if (s.lecture_id) _openLibraryLecture(s.lecture_id);
+      });
+      srcWrap.appendChild(item);
+    }
+    wrap.appendChild(srcWrap);
+  }
+
+  chatMessages.appendChild(wrap);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
+  return wrap;
+}
+
+function _appendThinking() {
+  const wrap = document.createElement('div');
+  wrap.className = 'chat-msg chat-msg-assistant chat-thinking';
+  wrap.innerHTML = `<div class="chat-bubble">
+    <span class="chat-dot"></span>
+    <span class="chat-dot"></span>
+    <span class="chat-dot"></span>
+  </div>`;
+  chatMessages.appendChild(wrap);
+  return wrap;
+}
+
+function _escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 // ── Anki table CSS (injected once) ───────────────────────────────────────────
 (function () {
   const s = document.createElement('style');
