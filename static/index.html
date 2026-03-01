@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Whisper עברית — תמלול הרצאות</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="header-inner">
+      <h1>🎙️ Whisper עברית</h1>
+      <p class="subtitle">תמלול הרצאות אקדמיות בעברית עם תיקון AI</p>
+    </div>
+  </header>
+
+  <main class="main-content">
+    <!-- Tabs -->
+    <div class="tabs" role="tablist">
+      <button class="tab active" data-tab="single" role="tab" aria-selected="true">קובץ בודד</button>
+      <button class="tab" data-tab="batch" role="tab" aria-selected="false">תיקייה שלמה</button>
+      <button class="tab" data-tab="settings" role="tab" aria-selected="false">⚙ הגדרות</button>
+    </div>
+
+    <!-- Tab: Single file -->
+    <section id="tab-single" class="tab-panel active" role="tabpanel">
+      <div class="card">
+        <div id="drop-zone" class="drop-zone" tabindex="0" role="button"
+             aria-label="גרור קובץ לכאן או לחץ לבחירה">
+          <div class="drop-icon">📁</div>
+          <p class="drop-text">גרור קובץ MP4 / MP3 / WAV לכאן</p>
+          <p class="drop-hint">או לחץ לבחירת קובץ</p>
+          <input type="file" id="file-input" accept="video/*,audio/*,.mp3,.wav,.m4a,.flac" hidden>
+        </div>
+        <div id="file-info" class="file-info hidden"></div>
+      </div>
+
+      <div class="card options-card">
+        <div class="option-row">
+          <label for="model-select">מודל Whisper</label>
+          <select id="model-select">
+            <option value="tiny">Tiny — מהיר מאוד, דיוק בסיסי</option>
+            <option value="small" selected>Small — מומלץ (מהיר + טוב)</option>
+            <option value="medium">Medium — דיוק גבוה, איטי יותר</option>
+            <option value="large">Large — דיוק מקסימלי, איטי</option>
+          </select>
+        </div>
+        <div class="option-row">
+          <label for="lang-select">שפה</label>
+          <select id="lang-select">
+            <option value="he" selected>עברית</option>
+            <option value="en">אנגלית</option>
+            <option value="auto">זיהוי אוטומטי</option>
+          </select>
+        </div>
+        <div class="option-row toggle-row">
+          <label class="toggle-label">
+            <span>תיקון אוטומטי עם Claude</span>
+            <span class="toggle-hint">(דורש Anthropic API key בהגדרות)</span>
+          </label>
+          <label class="toggle-track">
+            <input type="checkbox" id="fix-toggle">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <button id="start-btn" class="btn-primary" disabled>
+        🎙️ התחל תמלול
+      </button>
+    </section>
+
+    <!-- Tab: Batch -->
+    <section id="tab-batch" class="tab-panel" role="tabpanel" hidden>
+      <div class="card">
+        <label for="folder-input">נתיב תיקייה</label>
+        <div class="folder-row">
+          <input type="text" id="folder-input"
+                 placeholder="C:\Users\שם\Downloads\Video"
+                 dir="ltr">
+          <button id="folder-btn" class="btn-secondary">עיין</button>
+        </div>
+        <p class="hint">יעבד את כל קבצי MP4/MP3/WAV/M4A בתיקייה. קבצים שכבר תומללו ידולגו.</p>
+      </div>
+
+      <div class="card options-card">
+        <div class="option-row">
+          <label for="batch-model">מודל Whisper</label>
+          <select id="batch-model">
+            <option value="tiny">Tiny</option>
+            <option value="small" selected>Small</option>
+            <option value="medium">Medium</option>
+            <option value="large">Large</option>
+          </select>
+        </div>
+        <div class="option-row toggle-row">
+          <label class="toggle-label">
+            <span>תיקון Claude לכל הקבצים</span>
+          </label>
+          <label class="toggle-track">
+            <input type="checkbox" id="batch-fix-toggle">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <button id="batch-btn" class="btn-primary">
+        📂 עבד תיקייה
+      </button>
+    </section>
+
+    <!-- Tab: Settings -->
+    <section id="tab-settings" class="tab-panel" role="tabpanel" hidden>
+      <div class="card">
+        <h2>מפתח Anthropic API</h2>
+        <p class="hint">נדרש לתיקון אוטומטי בעברית עם Claude. לא נשמר בגיט.</p>
+        <label for="api-key-input">API Key</label>
+        <input type="password" id="api-key-input" placeholder="sk-ant-..." dir="ltr"
+               autocomplete="off">
+        <button id="save-key-btn" class="btn-primary" style="margin-top:12px">
+          💾 שמור מפתח
+        </button>
+        <div id="key-status" class="status-msg hidden"></div>
+      </div>
+    </section>
+
+    <!-- Progress -->
+    <div id="progress-section" class="card progress-card hidden">
+      <div class="progress-header">
+        <span id="progress-label">מתמלל...</span>
+        <span id="progress-pct">0%</span>
+      </div>
+      <div class="progress-bar-bg" role="progressbar" aria-valuenow="0"
+           aria-valuemin="0" aria-valuemax="100" id="progress-bar-aria">
+        <div class="progress-bar-fill" id="progress-bar"></div>
+      </div>
+      <p id="progress-msg" class="progress-msg" aria-live="polite"></p>
+    </div>
+
+    <!-- Result -->
+    <div id="result-section" class="card result-card hidden">
+      <div class="result-header">
+        <h2>תמלול</h2>
+        <div class="result-actions">
+          <button id="copy-btn" class="btn-secondary btn-sm">📋 העתק</button>
+          <button id="download-txt-btn" class="btn-secondary btn-sm">⬇ TXT</button>
+          <button id="download-srt-btn" class="btn-secondary btn-sm">⬇ SRT</button>
+        </div>
+      </div>
+      <div class="result-badges">
+        <span id="badge-fixed" class="badge badge-claude hidden">✨ תוקן על ידי Claude</span>
+        <span id="badge-raw" class="badge badge-raw hidden">📝 תמלול גולמי (Whisper)</span>
+      </div>
+      <textarea id="result-text" class="result-textarea" readonly dir="rtl"
+                aria-label="טקסט תמלול"></textarea>
+    </div>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
